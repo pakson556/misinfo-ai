@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body {
+    height: 100%;
+    @apply bg-white;
+  }
+  
+  body {
+    margin: 0;
+    color: #1e293b;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow;
+  }
+  
+  .input-focus {
+    @apply focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none;
+  }
+}

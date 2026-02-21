@@ -1,0 +1,11 @@
+{
+  "timestamp": "20260214_171513",
+  "models": [
+    "Unified Model"
+  ],
+  "output_dir": "/Users/princekofiamoah/Desktop/NewProject/misinfodetec/ml/data/results/run_20260214_171513",
+  "total_rows": 53209,
+  "train_rows": 42567,
+  "val_rows": 5320,
+  "test_rows": 5322
+}
