@@ -16,3 +16,6 @@ node_modules/
 # Datasets (do not upload)
 ml/data/raw/
 ml/data/processed/
+
+# Trained model files — hosted on Hugging Face (pakson/misinfo-ai-models)
+ml/data/models/*.joblib

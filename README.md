@@ -31,6 +31,10 @@ An AI-powered misinformation detection platform built as a final year dissertati
 ```bash
 cd ml
 pip install -r ../requirements.txt
+
+# Download trained models from Hugging Face (one-time setup)
+python download_models.py
+
 uvicorn api.main:app --reload
 ```
 
