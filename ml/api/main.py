@@ -2,43 +2,47 @@
 """
 Main FastAPI application for misinformation detection.
 
-After refactor:
-- main.py wires the app, loads models, and delegates heavy logic
-  to predict_service + ocr_service.
-- Adds dashboard metrics endpoints: /dashboard/metrics and /metrics
+Updated version:
+- Optional internet verification on /predict/auto
+- Existing ML pipeline preserved
+- OCR image route preserved
+- Dashboard metrics endpoints preserved
 """
 
-import uuid
-import traceback
 import time
+import traceback
+import uuid
 from pathlib import Path
-from typing import Optional, Any
+from typing import Any, Optional
 
 import joblib
-from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import (
-    APP_VERSION,
-    MODEL_UNIFIED,
-    MODEL_HEALTH,
-    THRESHOLD_UNIFIED,
-    THRESHOLD_HEALTH,
-    DEFAULT_THRESHOLD_UNIFIED,
-    DEFAULT_THRESHOLD_HEALTH,
     ALLOWED_ORIGINS,
+    APP_VERSION,
+    DEFAULT_THRESHOLD_HEALTH,
+    DEFAULT_THRESHOLD_UNIFIED,
+    ENHANCED_EARLY_MODEL,
     EVENTS_LOG,
+    LEGACY_EARLY_MODEL,
+    MODEL_HEALTH,
+    MODEL_UNIFIED,
+    THRESHOLD_HEALTH,
+    THRESHOLD_UNIFIED,
 )
-
-from .schemas import PredictRequest, AutoPredictResponse
-from .models import load_model_with_threshold, log_event, compute_trends
+from .models import load_model_with_threshold, log_event
+from .metrics_service import build_global_monitor, build_metrics
+from .ocr_service import (
+    OCR_AVAILABLE,
+    configure_tesseract,
+    extract_text_from_image_bytes,
+)
 from .predict_service import run_predict_auto
-from .ocr_service import OCR_AVAILABLE, configure_tesseract, extract_text_from_image_bytes
+from .schemas import AutoPredictResponse, PredictRequest
+from .live_feed_service import get_live_feed
 
-
-# -----------------------------------------------------------------------------
-# App
-# -----------------------------------------------------------------------------
 app = FastAPI(title="MisInfo AI", version=APP_VERSION)
 
 app.add_middleware(
@@ -49,54 +53,52 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# -----------------------------------------------------------------------------
-# Global model refs (loaded once at startup)
-# -----------------------------------------------------------------------------
 unified_model: Optional[Any] = None
 health_model: Optional[Any] = None
 legacy_early_model: Optional[Any] = None
 enhanced_early_model: Optional[Any] = None
 bert_classifier: Optional[Any] = None
 
-BASE_DIR = Path(__file__).parent.parent  # ml/
+BASE_DIR = Path(__file__).resolve().parent.parent
 MODELS_DIR = BASE_DIR / "data" / "models"
-ENHANCED_EARLY_MODEL = MODELS_DIR / "enhanced_early_multimodal_k50.joblib"
-LEGACY_EARLY_MODEL = MODELS_DIR / "twitter15_16_binary_early_multimodal_k50_calibrated.joblib"
 
 
 @app.on_event("startup")
-def startup():
+def startup() -> None:
     global unified_model, health_model, legacy_early_model, enhanced_early_model, bert_classifier
 
     print("=" * 60)
     print("Starting ML API")
     print("=" * 60)
 
-    # Unified
     try:
-        unified_model, _ = load_model_with_threshold(
-            MODEL_UNIFIED, THRESHOLD_UNIFIED, DEFAULT_THRESHOLD_UNIFIED
+        unified_model, unified_threshold = load_model_with_threshold(
+            MODEL_UNIFIED,
+            THRESHOLD_UNIFIED,
+            DEFAULT_THRESHOLD_UNIFIED,
         )
-        print("Loaded unified model")
+        print(f"Loaded unified model (threshold={unified_threshold})")
     except Exception as e:
         print(f"Failed to load unified model: {e}")
+        traceback.print_exc()
         unified_model = None
 
-    # Health (optional)
     try:
         if MODEL_HEALTH.exists():
-            health_model, _ = load_model_with_threshold(
-                MODEL_HEALTH, THRESHOLD_HEALTH, DEFAULT_THRESHOLD_HEALTH
+            health_model, health_threshold = load_model_with_threshold(
+                MODEL_HEALTH,
+                THRESHOLD_HEALTH,
+                DEFAULT_THRESHOLD_HEALTH,
             )
-            print("Loaded health model")
+            print(f"Loaded health model (threshold={health_threshold})")
         else:
             print("Health model not found (optional).")
             health_model = None
     except Exception as e:
         print(f"Failed to load health model: {e}")
+        traceback.print_exc()
         health_model = None
 
-    # Early models (optional)
     try:
         if ENHANCED_EARLY_MODEL.exists():
             enhanced_early_model = joblib.load(ENHANCED_EARLY_MODEL)
@@ -106,6 +108,7 @@ def startup():
             enhanced_early_model = None
     except Exception as e:
         print(f"Failed to load enhanced early model: {e}")
+        traceback.print_exc()
         enhanced_early_model = None
 
     try:
@@ -117,29 +120,30 @@ def startup():
             legacy_early_model = None
     except Exception as e:
         print(f"Failed to load legacy early model: {e}")
+        traceback.print_exc()
         legacy_early_model = None
 
-    # BERT classifier (optional)
     try:
         from .bert_classifier import BertMisinformationClassifier
+
         bert_classifier = BertMisinformationClassifier()
         print("Loaded bert_classifier")
     except Exception as e:
         print(f"bert_classifier not loaded (optional): {e}")
+        traceback.print_exc()
         bert_classifier = None
 
-    # OCR setup (optional)
     if OCR_AVAILABLE:
-        configure_tesseract()
+        try:
+            configure_tesseract()
+        except Exception as e:
+            print(f"OCR configuration warning: {e}")
 
     print("=" * 60)
     print(f"API ready. Version: {APP_VERSION}")
     print("=" * 60)
 
 
-# -----------------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------------
 def _safe_float(x):
     try:
         return float(x)
@@ -148,41 +152,27 @@ def _safe_float(x):
 
 
 def _event_ts_seconds(event: dict) -> Optional[int]:
-    """
-    Normalise event timestamp to epoch SECONDS in UTC.
-
-    Supports:
-      - numeric seconds
-      - numeric milliseconds
-      - numeric strings
-      - ISO strings with timezone (Z / +00:00 / etc.)
-      - ISO strings WITHOUT timezone (assume UTC)
-    """
     from datetime import datetime, timezone
 
     raw = event.get("ts") or event.get("timestamp") or event.get("created_at")
     if raw is None:
         return None
 
-    # numeric types
     if isinstance(raw, (int, float)):
         n = float(raw)
         return int(n / 1000) if n >= 10_000_000_000 else int(n)
 
-    # strings
     if isinstance(raw, str):
         s = raw.strip()
         if not s:
             return None
 
-        # numeric string
         try:
             n = float(s)
             return int(n / 1000) if n >= 10_000_000_000 else int(n)
         except Exception:
             pass
 
-        # ISO string
         try:
             s2 = s.replace("Z", "+00:00")
             dt = datetime.fromisoformat(s2)
@@ -196,9 +186,6 @@ def _event_ts_seconds(event: dict) -> Optional[int]:
     return None
 
 
-# -----------------------------------------------------------------------------
-# Routes
-# -----------------------------------------------------------------------------
 @app.get("/health")
 def health():
     return {
@@ -234,24 +221,27 @@ def predict_auto(req: PredictRequest, request: Request):
             enhanced_early_model=enhanced_early_model,
             legacy_early_model=legacy_early_model,
             bert_classifier=bert_classifier,
+            enable_internet=req.enable_internet,
         )
 
-        # Attach latency to response (ms)
         resp["latency_ms"] = round((time.time() - start) * 1000, 2)
 
-        # Log event
         try:
             log_event(
                 request_id=rid,
                 endpoint=str(request.url.path),
                 event_type="predict",
                 model_name="ensemble",
-                input_payload={"text": (req.text or "")[:5000]},
+                input_payload={
+                    "text": (req.text or "")[:5000],
+                    "enable_internet": bool(req.enable_internet),
+                },
                 output_payload=resp,
                 path=EVENTS_LOG,
             )
         except Exception as e:
             print(f"⚠️ Logging failed: {e}")
+            traceback.print_exc()
 
         return resp
 
@@ -263,7 +253,11 @@ def predict_auto(req: PredictRequest, request: Request):
 
 
 @app.post("/predict/auto/image", response_model=AutoPredictResponse)
-async def predict_auto_image(request: Request, file: UploadFile = File(...)):
+async def predict_auto_image(
+    request: Request,
+    file: UploadFile = File(...),
+    enable_internet: bool = Query(True),
+):
     if unified_model is None:
         raise HTTPException(status_code=500, detail="Unified model not loaded")
 
@@ -286,7 +280,7 @@ async def predict_auto_image(request: Request, file: UploadFile = File(...)):
             detail="OCR extracted no usable text. Try a clearer screenshot.",
         )
 
-    req2 = PredictRequest(text=extracted)
+    req2 = PredictRequest(text=extracted, enable_internet=enable_internet)
     resp = predict_auto(req2, request)
 
     resp["input_type"] = "image_ocr"
@@ -309,24 +303,16 @@ def models_info():
 
 @app.get("/trends")
 def trends(limit: int = 20, window: int = 2000):
-    return compute_trends(events_log=EVENTS_LOG, limit=limit, window=window)
+    return build_global_monitor(events_log=EVENTS_LOG, limit=limit, window=window)
 
 
-# -----------------------------------------------------------------------------
-# Dashboard Metrics
-# -----------------------------------------------------------------------------
 @app.get("/dashboard/metrics")
 def dashboard_metrics(window: int = 2000, recent: int = 10, bucket_seconds: int = 60):
-    """
-    Returns dashboard data in the exact format frontend expects.
-    Reads from EVENTS_LOG (JSONL).
-    """
     import json
     from collections import defaultdict
 
     generated_at = int(time.time())
 
-    # Load last N events
     events = []
     if EVENTS_LOG.exists():
         try:
@@ -368,7 +354,6 @@ def dashboard_metrics(window: int = 2000, recent: int = 10, bucket_seconds: int 
     confidences = []
     latencies_ms = []
 
-    # bucket -> {count, risk_sum}
     buckets = defaultdict(lambda: {"count": 0, "risk_sum": 0.0})
 
     for event in events:
@@ -392,13 +377,11 @@ def dashboard_metrics(window: int = 2000, recent: int = 10, bucket_seconds: int 
         if conf is not None:
             confidences.append(conf)
 
-        # latency
         latency = output.get("latency_ms") or event.get("latency_ms")
         latency_f = _safe_float(latency)
         if latency_f is not None:
             latencies_ms.append(latency_f)
 
-        # timeseries bucket (IMPORTANT: numeric UTC epoch seconds)
         tsec = _event_ts_seconds(event)
         if tsec is not None:
             b = int(tsec // bucket_seconds) * bucket_seconds
@@ -406,11 +389,9 @@ def dashboard_metrics(window: int = 2000, recent: int = 10, bucket_seconds: int 
             if risk is not None:
                 buckets[int(b)]["risk_sum"] += float(risk)
 
-    # averages
     avg_risk = (sum(risks) / len(risks)) if risks else None
     avg_conf = (sum(confidences) / len(confidences)) if confidences else None
 
-    # latency stats
     lat_avg = (sum(latencies_ms) / len(latencies_ms)) if latencies_ms else None
     lat_p95 = None
     if latencies_ms:
@@ -418,7 +399,6 @@ def dashboard_metrics(window: int = 2000, recent: int = 10, bucket_seconds: int 
         idx = int(round(0.95 * (len(xs) - 1)))
         lat_p95 = xs[idx]
 
-    # timeseries list (IMPORTANT: sorted numerically)
     timeseries = []
     for t_bucket in sorted(buckets.keys()):
         c = buckets[t_bucket]["count"]
@@ -426,7 +406,6 @@ def dashboard_metrics(window: int = 2000, recent: int = 10, bucket_seconds: int 
         avg = (rs / c) if c > 0 else 0.0
         timeseries.append({"t": int(t_bucket), "avg_risk": float(avg), "count": int(c)})
 
-    # recent rows
     recent_rows = []
     tail = events[-recent:] if recent > 0 else []
     for event in tail:
@@ -438,16 +417,18 @@ def dashboard_metrics(window: int = 2000, recent: int = 10, bucket_seconds: int 
         if len(text) > 120:
             text = text[:117] + "..."
 
-        recent_rows.append({
-            "request_id": output.get("request_id") or event.get("request_id") or "",
-            "ts": _event_ts_seconds(event),
-            "text_preview": text or "(no preview)",
-            "risk_band": output.get("risk_band") or "",
-            "verdict": output.get("action_verdict") or "",
-            "misinfo_probability": _safe_float(output.get("misinfo_probability")),
-            "confidence": _safe_float(output.get("confidence")),
-            "stance": misinfo.get("stance") or output.get("stance") or "",
-        })
+        recent_rows.append(
+            {
+                "request_id": output.get("request_id") or event.get("request_id") or "",
+                "ts": _event_ts_seconds(event),
+                "text_preview": text or "(no preview)",
+                "risk_band": output.get("risk_band") or "",
+                "verdict": output.get("action_verdict") or "",
+                "misinfo_probability": _safe_float(output.get("misinfo_probability")),
+                "confidence": _safe_float(output.get("confidence")),
+                "stance": misinfo.get("stance") or output.get("stance") or "",
+            }
+        )
 
     return {
         "totals": totals,
@@ -475,3 +456,7 @@ def dashboard_metrics(window: int = 2000, recent: int = 10, bucket_seconds: int 
 @app.get("/metrics")
 def metrics_alias(window: int = 2000, recent: int = 10, bucket_seconds: int = 60):
     return dashboard_metrics(window=window, recent=recent, bucket_seconds=bucket_seconds)
+
+@app.get("/live-feed")
+def live_feed(limit: int = 20):
+    return get_live_feed(limit=limit)

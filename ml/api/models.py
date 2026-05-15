@@ -7,14 +7,12 @@ from typing import Any, Dict, Optional, Tuple
 import pandas as pd
 
 
-# These are the structural cols your pipeline was trained with
 STRUCT_COLS = [
     "root_outdeg", "num_nodes", "num_edges", "tree_depth",
     "max_breadth", "leaf_nodes", "leaf_ratio", "avg_outdeg",
     "branching_factor",
 ]
 
-# Extra text-derived cols your enhanced early model may use
 ENHANCED_COLS = [
     "text_length", "has_url", "has_question", "has_exclamation",
     "caps_ratio", "has_share_phrase", "has_urgency_phrase",
@@ -31,15 +29,8 @@ def make_feature_frame(
     struct: Optional[Dict[str, float]] = None,
     extra: Optional[Dict[str, float]] = None,
 ) -> pd.DataFrame:
-    """
-    Always return a 1-row DataFrame with ALL expected columns.
-    This prevents:
-      - "Expected 2D array got 1D"
-      - "KeyError: none of [struct cols] are in the columns"
-    """
     row: Dict[str, Any] = {"source_text": text}
 
-    # Fill structural defaults (0/1-ish safe defaults)
     struct = struct or {}
     defaults = {
         "root_outdeg": 0.0,
@@ -55,7 +46,6 @@ def make_feature_frame(
     for c in STRUCT_COLS:
         row[c] = float(struct.get(c, defaults.get(c, 0.0)))
 
-    # Fill enhanced defaults
     extra = extra or {}
     for c in ENHANCED_COLS:
         row[c] = float(extra.get(c, 0.0))
@@ -69,19 +59,21 @@ def predict_probs_unified(
     struct: Optional[Dict[str, float]] = None,
     extra: Optional[Dict[str, float]] = None,
 ) -> Dict[str, float]:
-    """
-    Predict probabilities with a sklearn Pipeline/CalibratedClassifierCV
-    that expects a DataFrame with specific columns.
-    """
     X = make_feature_frame(text, struct=struct, extra=extra)
     proba = model.predict_proba(X)[0]
     return {"prob_neg": float(proba[0]), "prob_pos": float(proba[1])}
 
 
 def risk_band(prob_pos: float) -> str:
-    if prob_pos >= 0.60:
+    """
+    Keep backend thresholds aligned with the frontend:
+      0.00 - 0.14 -> LOW
+      0.15 - 0.44 -> MEDIUM
+      0.45+       -> HIGH
+    """
+    if prob_pos >= 0.45:
         return "HIGH"
-    if prob_pos >= 0.34:
+    if prob_pos >= 0.15:
         return "MEDIUM"
     return "LOW"
 
@@ -90,17 +82,14 @@ def control_action(band: str) -> str:
     b = (band or "").upper()
     if b == "HIGH":
         return (
-            "High-risk signal detected. Do not share this content. "
-            "Seek primary evidence from official sources before engaging."
+            "High-risk signal. Do not share until the claim has been checked against trusted primary sources."
         )
     if b == "MEDIUM":
         return (
-            "Medium-risk signal. Delay sharing and verify key details. "
-            "Check whether reputable outlets confirm the claim."
+            "Medium-risk signal. Verify key claims using trusted sources before sharing."
         )
     return (
-        "Low-risk signal. Sharing risk appears lower, but still verify "
-        "if the claim is high-impact or time-sensitive."
+        "Low-risk signal. Sharing risk appears lower, but still verify if the claim is high-impact or time-sensitive."
     )
 
 
@@ -109,9 +98,6 @@ def load_model_with_threshold(
     threshold_path: Path,
     default_threshold: float,
 ) -> Tuple[Any, float]:
-    """
-    Load joblib model + threshold json (if present).
-    """
     import joblib
 
     model = joblib.load(model_path)
@@ -137,9 +123,6 @@ def log_event(
     output_payload: Dict[str, Any],
     path: Path,
 ) -> None:
-    """
-    JSONL event logging.
-    """
     import datetime
 
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -157,9 +140,6 @@ def log_event(
 
 
 def compute_trends(events_log: Path, limit: int = 20, window: int = 2000) -> Dict[str, Any]:
-    """
-    Lightweight offline trends: counts frequent terms in recent logged requests.
-    """
     import re
     from collections import Counter
 

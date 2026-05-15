@@ -3,7 +3,7 @@ import Sidebar from "./components/Sidebar.jsx";
 
 import DetectionLab from "./pages/DetectionLab.jsx";
 import GlobalMonitor from "./pages/GlobalMonitor.jsx";
-import Dashboard from "./pages/Dashboard/Dashboard.jsx"; // ✅ important
+import Dashboard from "./pages/Dashboard/Dashboard.jsx"; 
 
 export default function App() {
   const [activeTab, setActiveTab] = useState("analyze");
@@ -13,7 +13,7 @@ export default function App() {
       <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} />
 
       <main className="flex-1">
-        {activeTab === "dashboard" && <Dashboard />}   {/* ✅ ADD THIS */}
+        {activeTab === "dashboard" && <Dashboard />}   
         {activeTab === "analyze" && <DetectionLab />}
         {activeTab === "monitor" && <GlobalMonitor />}
       </main>

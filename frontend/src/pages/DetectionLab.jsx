@@ -7,64 +7,61 @@ import ImageUploader from "../components/ImageUploader.jsx";
 
 // Validation function for saved results
 const isValidResult = (result) => {
-  return result && 
-         typeof result === 'object' && 
-         result.action_verdict && 
-         result.risk_band &&
-         ['SAFE_TO_SHARE', 'VERIFY_REQUIRED', 'LIKELY_MISINFORMATION'].includes(result.action_verdict);
+  return (
+    result &&
+    typeof result === "object" &&
+    result.action_verdict &&
+    result.risk_band &&
+    ["SAFE_TO_SHARE", "VERIFY_REQUIRED", "LIKELY_MISINFORMATION"].includes(result.action_verdict)
+  );
 };
 
 export default function DetectionLab() {
-  // Load saved state from localStorage on initial render with validation
   const [input, setInput] = useState(() => {
     try {
-      return localStorage.getItem('detectionLab_input') || "";
+      return localStorage.getItem("detectionLab_input") || "";
     } catch {
       return "";
     }
   });
-  
+
   const [imageFile, setImageFile] = useState(null);
   const [textAnalyzing, setTextAnalyzing] = useState(false);
   const [imageAnalyzing, setImageAnalyzing] = useState(false);
-  
-  // Load saved result with validation
+
   const [result, setResult] = useState(() => {
     try {
-      const saved = localStorage.getItem('detectionLab_result');
+      const saved = localStorage.getItem("detectionLab_result");
       if (saved) {
         const parsed = JSON.parse(saved);
         if (isValidResult(parsed)) {
           return parsed;
         }
-        // Invalid saved data - clear it
-        localStorage.removeItem('detectionLab_result');
+        localStorage.removeItem("detectionLab_result");
       }
     } catch (e) {
       console.warn("Failed to load saved result:", e);
-      localStorage.removeItem('detectionLab_result');
+      localStorage.removeItem("detectionLab_result");
     }
     return null;
   });
-  
+
   const [err, setErr] = useState("");
 
-  // Save input to localStorage whenever it changes
   useEffect(() => {
     try {
-      localStorage.setItem('detectionLab_input', input);
+      localStorage.setItem("detectionLab_input", input);
     } catch (e) {
       console.warn("Failed to save input:", e);
     }
   }, [input]);
 
-  // Save result to localStorage whenever it changes
   useEffect(() => {
     try {
       if (result && isValidResult(result)) {
-        localStorage.setItem('detectionLab_result', JSON.stringify(result));
+        localStorage.setItem("detectionLab_result", JSON.stringify(result));
       } else {
-        localStorage.removeItem('detectionLab_result');
+        localStorage.removeItem("detectionLab_result");
       }
     } catch (e) {
       console.warn("Failed to save result:", e);
@@ -73,26 +70,25 @@ export default function DetectionLab() {
 
   const handleTextAnalysis = async () => {
     if (!input.trim()) return;
-    
+
     setErr("");
     setTextAnalyzing(true);
-    setResult(null); // Clear previous result
-    
+    setResult(null);
+
     try {
-      // Add timeout to fetch
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-      
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+
       const res = await api.predictAutoText(input);
       clearTimeout(timeoutId);
-      
+
       if (isValidResult(res)) {
         setResult(res);
       } else {
         throw new Error("Invalid response format from server");
       }
     } catch (e) {
-      if (e.name === 'AbortError') {
+      if (e.name === "AbortError") {
         setErr("Request timed out. The server might be busy.");
       } else {
         setErr(e?.message || "Analysis failed. Check if backend is running.");
@@ -104,25 +100,25 @@ export default function DetectionLab() {
 
   const handleImageAnalysis = async () => {
     if (!imageFile) return;
-    
+
     setErr("");
     setImageAnalyzing(true);
     setResult(null);
-    
+
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 45000); // 45 second timeout for images
-      
+      const timeoutId = setTimeout(() => controller.abort(), 45000);
+
       const res = await api.predictAutoImage(imageFile);
       clearTimeout(timeoutId);
-      
+
       if (isValidResult(res)) {
         setResult(res);
       } else {
         throw new Error("Invalid response format from server");
       }
     } catch (e) {
-      if (e.name === 'AbortError') {
+      if (e.name === "AbortError") {
         setErr("Image analysis timed out. The image might be too large or OCR is slow.");
       } else {
         setErr(e?.message || "Analysis failed. Make sure Tesseract OCR is installed.");
@@ -132,15 +128,14 @@ export default function DetectionLab() {
     }
   };
 
-  // Clear all saved data
   const handleClear = () => {
     setInput("");
     setImageFile(null);
     setResult(null);
     setErr("");
     try {
-      localStorage.removeItem('detectionLab_input');
-      localStorage.removeItem('detectionLab_result');
+      localStorage.removeItem("detectionLab_input");
+      localStorage.removeItem("detectionLab_result");
     } catch (e) {
       console.warn("Failed to clear localStorage:", e);
     }
@@ -148,13 +143,12 @@ export default function DetectionLab() {
 
   return (
     <div className="max-w-5xl mx-auto">
-      {/* Header with Clear button */}
       <div className="mb-8 flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Detection & Analysis Lab</h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Detection &amp; Analysis Lab</h1>
           <p className="text-gray-600">
-            Paste text or upload an image with text to detect misinformation. This uses 3 ensemble models 
-            analyzes content and provides early warning signals.
+            Analyse text or image-based content for potential misinformation. This system uses an
+            ensemble of three models to assess content and provide early warning signals.
           </p>
         </div>
         {(input || imageFile || result) && (
@@ -167,15 +161,13 @@ export default function DetectionLab() {
         )}
       </div>
 
-      {/* Input Grid */}
       <div className="grid md:grid-cols-2 gap-6 mb-8">
-        {/* Text Input */}
         <div className="bg-white border border-gray-200 rounded-xl p-6">
           <div className="flex items-center gap-2 mb-4">
             <FileText className="w-5 h-5 text-gray-700" />
             <h2 className="font-semibold text-gray-900">Text Analysis</h2>
           </div>
-          
+
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -183,11 +175,9 @@ export default function DetectionLab() {
             className="w-full h-32 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none resize-none"
             disabled={textAnalyzing || imageAnalyzing}
           />
-          
+
           <div className="mt-4 flex items-center justify-between">
-            <span className="text-xs text-gray-400">
-              {input.length} characters
-            </span>
+            <span className="text-xs text-gray-400">{input.length} characters</span>
             <button
               onClick={handleTextAnalysis}
               disabled={textAnalyzing || imageAnalyzing || !input.trim()}
@@ -196,16 +186,15 @@ export default function DetectionLab() {
               {textAnalyzing ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  Analyzing...
+                  Analysing...
                 </>
               ) : (
-                "Analyze Text"
+                "Analyse Text"
               )}
             </button>
           </div>
         </div>
 
-        {/* Image Upload */}
         <ImageUploader
           onImageSelect={setImageFile}
           onAnalyze={handleImageAnalysis}
@@ -213,7 +202,6 @@ export default function DetectionLab() {
         />
       </div>
 
-      {/* Error Message */}
       {err && (
         <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
           <p className="text-red-700 text-sm flex items-start gap-2">
@@ -223,20 +211,16 @@ export default function DetectionLab() {
         </div>
       )}
 
-      {/* Loading State for Result */}
       {(textAnalyzing || imageAnalyzing) && !result && (
         <div className="mt-8 p-12 bg-white border border-gray-200 rounded-xl text-center">
           <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-4" />
-          <p className="text-gray-600">Analyzing content... This may take a moment.</p>
+          <p className="text-gray-600">Analysing content... This may take a moment.</p>
           {imageAnalyzing && (
-            <p className="text-sm text-gray-400 mt-2">
-              OCR text extraction in progress...
-            </p>
+            <p className="text-sm text-gray-400 mt-2">OCR text extraction in progress...</p>
           )}
         </div>
       )}
 
-      {/* Result - Now persists across navigation */}
       {result && !textAnalyzing && !imageAnalyzing && (
         <div className="mt-8">
           <ResultCard result={result} />

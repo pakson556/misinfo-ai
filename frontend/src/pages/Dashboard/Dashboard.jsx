@@ -36,13 +36,10 @@ export default function Dashboard() {
   async function load() {
     try {
       setErr("");
-      const range = TIME_RANGES.find((r) => r.value === timeRange) || TIME_RANGES[0];
+      const range =
+        TIME_RANGES.find((r) => r.value === timeRange) || TIME_RANGES[0];
 
-      const res = await api.getMetrics({
-        window: range.window,
-        recent: 10,
-        bucket_seconds: range.bucket,
-      });
+      const res = await api.getDashboardMetrics(range.window, 10, range.bucket);
 
       setData(res);
     } catch (e) {
@@ -112,14 +109,15 @@ export default function Dashboard() {
 
   return (
     <div className="p-6">
-      {/* Header */}
       <div className="mb-6">
         <div className="flex items-center justify-between">
           <div>
             <div className="text-2xl font-semibold text-gray-900">Performance Dashboard</div>
             <div className="text-sm text-gray-500">
               Live operational metrics from{" "}
-              <span className="font-mono text-xs">{data?.events_log}</span>
+              <span className="font-mono text-xs">
+                {data?.events_log ? data.events_log.split("/").pop() : "events.jsonl"}
+              </span>
             </div>
           </div>
 
@@ -153,7 +151,6 @@ export default function Dashboard() {
         ) : null}
       </div>
 
-      {/* Metrics Cards */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
         <MetricsCard title="Total analyses" value={analyses} sub="Count of predict events" />
         <MetricsCard title="Avg risk" value={avgRiskPct} sub="Mean misinfo_probability" />
@@ -161,7 +158,6 @@ export default function Dashboard() {
         <MetricsCard title="Latency p95" value={p95Formatted} sub={p95Subtext} />
       </div>
 
-      {/* Charts Row */}
       <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
           <RiskTrendChart timeseries={data?.timeseries || []} />
@@ -169,18 +165,15 @@ export default function Dashboard() {
         <BreakdownBars title="Risk bands" items={bands} />
       </div>
 
-      {/* Breakdowns Row */}
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <BreakdownBars title="Action verdicts" items={verdicts} />
         <BreakdownBars title="Stance distribution" items={stance} />
       </div>
 
-      {/* Recent Analyses */}
       <div className="mt-4">
         <RecentAnalyses rows={data?.recent || []} />
       </div>
 
-      {/* Last updated */}
       {data?.generated_at ? (
         <div className="mt-4 text-xs text-gray-400 text-right">
           Last updated: {new Date(data.generated_at * 1000).toLocaleString()}

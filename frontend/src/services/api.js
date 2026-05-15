@@ -1,109 +1,72 @@
-// frontend/src/services/api.js
-const DEFAULT_BASE = "http://127.0.0.1:8000";
+const API_BASE = "http://127.0.0.1:8000";
 
-export function getApiBase() {
-  return import.meta.env.VITE_API_BASE_URL || DEFAULT_BASE;
-}
-
-async function httpJson(path, { method = "GET", body } = {}) {
-  const base = getApiBase();
-  const url = `${base}${path}`;
-
-  console.log(`🌐 API Request: ${method} ${url}`);
+async function handleResponse(res) {
+  let data = null;
 
   try {
-    const res = await fetch(url, {
-      method,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-
-    console.log(`📡 Response status: ${res.status}`);
-
-    if (!res.ok) {
-      const text = await res.text();
-      console.error(`❌ API Error ${res.status}:`, text);
-
-      try {
-        const errorJson = JSON.parse(text);
-        throw new Error(errorJson.detail || errorJson.message || `HTTP ${res.status}`);
-      } catch {
-        throw new Error(`HTTP ${res.status}\n${text.substring(0, 200)}`);
-      }
-    }
-
-    const data = await res.json();
-    console.log(`✅ API Success:`, data);
-    return data;
-  } catch (error) {
-    console.error(`❌ Fetch error:`, error);
-    throw error;
+    data = await res.json();
+  } catch {
+    data = null;
   }
-}
 
-async function httpForm(path, formData, { method = "POST" } = {}) {
-  const base = getApiBase();
-  const url = `${base}${path}`;
-
-  console.log(`🌐 API Form Request: ${method} ${url}`);
-
-  try {
-    const res = await fetch(url, { method, body: formData });
-
-    console.log(`📡 Response status: ${res.status}`);
-
-    if (!res.ok) {
-      const text = await res.text();
-      console.error(`❌ API Error ${res.status}:`, text);
-
-      try {
-        const errorJson = JSON.parse(text);
-        throw new Error(errorJson.detail || errorJson.message || `HTTP ${res.status}`);
-      } catch {
-        throw new Error(`HTTP ${res.status}\n${text.substring(0, 200)}`);
-      }
-    }
-
-    const data = await res.json();
-    console.log(`✅ API Success:`, data);
-    return data;
-  } catch (error) {
-    console.error(`❌ Fetch error:`, error);
-    throw error;
+  if (!res.ok) {
+    const detail =
+      data?.detail ||
+      data?.message ||
+      `Request failed with status ${res.status}`;
+    throw new Error(detail);
   }
+
+  return data;
 }
 
 export const api = {
-  // Core
-  getRoot: () => httpJson("/"),
-  getHealth: () => httpJson("/health"),
-  getModelsInfo: () => httpJson("/models/info"),
+  async predictAutoText(text, enableInternet = true) {
+    const res = await fetch(`${API_BASE}/predict/auto`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text,
+        enable_internet: enableInternet,
+      }),
+    });
 
-  // Predictions
-  predictAutoText: (text) => {
-    console.log("🔤 Calling predictAutoText with:", (text || "").substring(0, 50) + "...");
-    return httpJson("/predict/auto", { method: "POST", body: { text } });
+    return handleResponse(res);
   },
 
-  predictAutoImage: (file) => {
-    console.log("🖼️ Calling predictAutoImage with:", file?.name);
-    const fd = new FormData();
-    fd.append("file", file);
-    return httpForm("/predict/auto/image", fd);
+  async predictAutoImage(file, enableInternet = true) {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const res = await fetch(
+      `${API_BASE}/predict/auto/image?enable_internet=${encodeURIComponent(enableInternet)}`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    return handleResponse(res);
   },
 
-  // Trends / Monitoring
-  getTrends: (limit = 20, window = 2000) =>
-    httpJson(`/trends?limit=${encodeURIComponent(limit)}&window=${encodeURIComponent(window)}`),
+  async getHealth() {
+    const res = await fetch(`${API_BASE}/health`);
+    return handleResponse(res);
+  },
 
-  // ✅ Dashboard metrics
-  getMetrics: ({ window = 2000, recent = 10, bucket_seconds = 60 } = {}) =>
-    httpJson(
-      `/dashboard/metrics?window=${encodeURIComponent(window)}&recent=${encodeURIComponent(
-        recent
-      )}&bucket_seconds=${encodeURIComponent(bucket_seconds)}`
-    ),
+  async getTrends(limit = 20, window = 2000) {
+    const res = await fetch(
+      `${API_BASE}/trends?limit=${encodeURIComponent(limit)}&window=${encodeURIComponent(window)}`
+    );
+    return handleResponse(res);
+  },
+
+  async getDashboardMetrics(window = 2000, recent = 10, bucketSeconds = 60) {
+    const res = await fetch(
+      `${API_BASE}/dashboard/metrics?window=${encodeURIComponent(window)}&recent=${encodeURIComponent(recent)}&bucket_seconds=${encodeURIComponent(bucketSeconds)}`
+    );
+    return handleResponse(res);
+  },
 };

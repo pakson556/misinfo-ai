@@ -1,346 +1,359 @@
+#!/usr/bin/env python3
 """
-BERT-based classifier for context-aware misinformation detection.
-This provides a second opinion that understands nuance better than pattern-matching.
+BERT / fallback classifier for misinformation detection.
+
+Important:
+- This file NEVER returns stance="credible"
+- Allowed stance values are only:
+  - debunking
+  - warning
+  - neutral
+  - spreading
+
+This fixes the FastAPI ResponseValidationError caused by:
+misinformation.stance = "credible"
 """
 
+from __future__ import annotations
+
+import os
 import re
-from typing import Dict, List, Any, Optional
-import numpy as np
+from typing import Any, Dict, Optional
 
-# Try to import torch and transformers, but don't fail if not available
+# Optional transformer stack
 try:
     import torch
-    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
     TRANSFORMERS_AVAILABLE = True
-    print("✅ Transformers library available")
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
-    print("⚠️ Transformers/torch not available. BERT classifier will use fallback mode.")
+except Exception:
     torch = None
-    AutoTokenizer = None
     AutoModelForSequenceClassification = None
+    AutoTokenizer = None
+    TRANSFORMERS_AVAILABLE = False
+
+
+def _clip01(value: float) -> float:
+    try:
+        v = float(value)
+    except Exception:
+        return 0.0
+    if v < 0.0:
+        return 0.0
+    if v > 1.0:
+        return 1.0
+    return v
+
+
+def _normalise_stance(value: Optional[str]) -> str:
+    """
+    Force stance into the exact schema-safe literals.
+    """
+    if not value:
+        return "neutral"
+
+    v = str(value).strip().lower()
+
+    mapping = {
+        "credible": "neutral",
+        "safe": "neutral",
+        "true": "neutral",
+        "real": "neutral",
+        "factual": "neutral",
+        "neutral": "neutral",
+        "debunking": "debunking",
+        "warning": "warning",
+        "spreading": "spreading",
+    }
+    return mapping.get(v, "neutral")
+
 
 class BertMisinformationClassifier:
-    def __init__(self, model_name="facebook/bart-large-mnli"):
-        """
-        Initialize with a zero-shot classifier that can understand context.
-        Using BART trained on MNLI for natural language inference.
-        """
-        self.device = None
+    """
+    Loads a transformer model when available.
+    Falls back to rule-based classification when transformers/torch are not installed.
+    """
+
+    def __init__(
+        self,
+        model_name: Optional[str] = None,
+        local_model_dir: Optional[str] = None,
+    ) -> None:
+        self.model_name = model_name or os.getenv(
+            "BERT_MODEL_NAME", "distilbert-base-uncased-finetuned-sst-2-english"
+        )
+        self.local_model_dir = local_model_dir or os.getenv("BERT_LOCAL_MODEL_DIR")
+        self.available = False
+        self.mode = "fallback"
         self.tokenizer = None
         self.model = None
-        self.model_name = model_name
-        self.transformers_available = TRANSFORMERS_AVAILABLE
-        
-        if self.transformers_available:
-            try:
-                self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                print(f"📊 BERT classifier using device: {self.device}")
-                
-                self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-                self.model = AutoModelForSequenceClassification.from_pretrained(model_name).to(self.device)
-                self.model.eval()
-                print(f"✅ Loaded BERT model: {model_name}")
-            except Exception as e:
-                print(f"⚠️ Failed to load BERT model: {e}")
-                self.transformers_available = False
+
+        if TRANSFORMERS_AVAILABLE:
+            self._try_load_transformer()
         else:
+            print("⚠️ Transformers/torch not available. BERT classifier will use fallback mode.")
+
+        if not self.available:
             print("⚠️ BERT classifier running in fallback mode (rule-based)")
-        
-        # Cache for common patterns
-        self.cache = {}
-        
-    def predict_stance(self, text: str) -> Dict[str, float]:
+
+    def _try_load_transformer(self) -> None:
         """
-        Predict whether text is supporting, refuting, or neutral toward a claim.
-        This helps distinguish between spreading vs debunking.
+        Try to load a transformer classifier. If anything fails, stay in fallback mode.
         """
-        if not self.transformers_available:
-            # Fallback to simple rule-based detection
-            return self._fallback_stance_detection(text)
-        
-        # Check cache first
-        if text in self.cache:
-            return self.cache[text]
-        
-        # Define hypotheses
-        hypotheses = [
-            "This text is spreading misinformation.",
-            "This text is fact-checking or debunking misinformation.",
-            "This text is neutral or educational.",
-            "This text is satirical or parody.",
-            "This text is promoting a conspiracy theory.",
-            "This text is citing scientific evidence.",
-            "This text is expressing a personal opinion.",
-            "This text is reporting news factually.",
-        ]
-        
-        scores = {}
-        for hypothesis in hypotheses:
-            try:
-                # Prepare input
-                inputs = self.tokenizer(
-                    text,
-                    hypothesis,
-                    truncation=True,
-                    padding=True,
-                    max_length=512,
-                    return_tensors="pt"
-                ).to(self.device)
-                
-                # Get prediction
-                with torch.no_grad():
-                    outputs = self.model(**inputs)
-                    logits = outputs.logits
-                    probs = torch.softmax(logits, dim=-1)
-                    
-                    # For MNLI, we want the entailment score (class 0)
-                    # 0: entailment, 1: neutral, 2: contradiction
-                    entailment_score = probs[0][0].item()
-                    scores[hypothesis] = entailment_score
-            except Exception as e:
-                print(f"⚠️ Error predicting for hypothesis '{hypothesis}': {e}")
-                scores[hypothesis] = 0.0
-        
-        # Normalize scores if any were successful
-        if scores and any(scores.values()):
-            total = sum(scores.values())
-            if total > 0:
-                scores = {k: v/total for k, v in scores.items()}
-        
-        self.cache[text] = scores
-        return scores
-    
-    def _fallback_stance_detection(self, text: str) -> Dict[str, float]:
-        """
-        Simple rule-based fallback when transformers aren't available.
-        """
-        text_lower = text.lower()
-        scores = {}
-        
-        # Check for fact-checking indicators
-        fact_check_keywords = [
-            "fact-check", "debunked", "misleading", "false claim",
-            "no evidence", "actually", "in reality", "contrary to",
-            "snopes", "fact check"
-        ]
-        fact_check_score = sum(1 for kw in fact_check_keywords if kw in text_lower) / len(fact_check_keywords)
-        
-        # Check for spreading indicators
-        spreading_keywords = [
-            "share this", "spread the word", "they don't want",
-            "cover up", "hidden truth", "wake up", "conspiracy",
-            "big pharma", "hoax", "propaganda"
-        ]
-        spreading_score = sum(1 for kw in spreading_keywords if kw in text_lower) / len(spreading_keywords)
-        
-        # Check for credible indicators
-        credible_keywords = [
-            "study", "research", "evidence", "data", "clinical trials",
-            "scientists", "experts", "according to", "study shows",
-            "research indicates"
-        ]
-        credible_score = sum(1 for kw in credible_keywords if kw in text_lower) / len(credible_keywords)
-        
-        # Check for satire indicators
-        satire_keywords = ["april fools", "satire", "joke", "parody", "made-up", "not real"]
-        satire_score = sum(1 for kw in satire_keywords if kw in text_lower) / len(satire_keywords)
-        
-        # Add small base scores
-        scores = {
-            "This text is fact-checking or debunking misinformation.": fact_check_score + 0.1,
-            "This text is spreading misinformation.": spreading_score + 0.1,
-            "This text is citing scientific evidence.": credible_score + 0.1,
-            "This text is satirical or parody.": satire_score + 0.1,
-            "This text is neutral or educational.": 0.2,
-        }
-        
-        # Normalize
-        total = sum(scores.values())
-        if total > 0:
-            scores = {k: v/total for k, v in scores.items()}
-        
-        return scores
-    
-    def extract_key_phrases(self, text: str, top_k: int = 5) -> List[Dict]:
-        """
-        Extract key phrases that influenced the decision using attention.
-        Falls back to simple keyword extraction if attention isn't available.
-        """
-        if not self.transformers_available:
-            return self._fallback_key_phrases(text, top_k)
-        
         try:
-            # Try to get attentions
-            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=512).to(self.device)
-            
-            with torch.no_grad():
-                # Request attentions, but handle gracefully if not available
-                outputs = self.model(**inputs, output_attentions=True)
-            
-            # Check if attentions are available
-            if not hasattr(outputs, 'attentions') or outputs.attentions is None:
-                print("⚠️ Model doesn't output attentions, using fallback")
-                return self._fallback_key_phrases(text, top_k)
-            
-            # Get attention weights from the last layer
-            # For BART, attentions are a tuple of layers, each with shape (batch, heads, seq_len, seq_len)
-            last_layer_attention = outputs.attentions[-1]
-            
-            # Average across attention heads
-            avg_attention = last_layer_attention.mean(dim=1)  # Shape: (batch, seq_len, seq_len)
-            
-            # Get attention to [CLS] token (first token) as importance measure
-            cls_attention = avg_attention[0, 0, :]  # Attention from CLS to all tokens
-            
-            # Convert to numpy
-            attention_scores = cls_attention.cpu().numpy()
-            
-            # Get tokens
-            tokens = self.tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
-            
-            # Pair tokens with attention scores
-            token_scores = list(zip(tokens, attention_scores))
-            
-            # Filter out special tokens and punctuation
-            important_phrases = []
-            current_phrase = []
-            current_score = 0
-            
-            for token, score in token_scores:
-                # Skip special tokens
-                if token in ['<s>', '</s>', '<pad>', '[CLS]', '[SEP]', '[PAD]', '<unk>']:
-                    if current_phrase:
-                        important_phrases.append({
-                            'phrase': ' '.join(current_phrase),
-                            'score': float(current_score / len(current_phrase))
-                        })
-                        current_phrase = []
-                        current_score = 0
-                # Skip punctuation
-                elif re.match(r'^[^\w]+$', token):
-                    continue
-                else:
-                    # Clean token (remove special characters)
-                    clean_token = token.replace('Ġ', '').replace('▁', '')
-                    if clean_token and len(clean_token) > 1:  # Only keep meaningful words
-                        current_phrase.append(clean_token)
-                        current_score += score
-            
-            # Add last phrase
-            if current_phrase:
-                important_phrases.append({
-                    'phrase': ' '.join(current_phrase),
-                    'score': float(current_score / len(current_phrase))
-                })
-            
-            # Sort by score and return top_k
-            important_phrases.sort(key=lambda x: x['score'], reverse=True)
-            
-            # If no phrases extracted, use fallback
-            if not important_phrases:
-                return self._fallback_key_phrases(text, top_k)
-                
-            return important_phrases[:top_k]
-            
-        except Exception as e:
-            print(f"⚠️ Error extracting key phrases: {e}")
-            return self._fallback_key_phrases(text, top_k)
-    
-    def _fallback_key_phrases(self, text: str, top_k: int = 5) -> List[Dict]:
+            load_target = self.local_model_dir or self.model_name
+            self.tokenizer = AutoTokenizer.from_pretrained(load_target)
+            self.model = AutoModelForSequenceClassification.from_pretrained(load_target)
+            self.model.eval()
+            self.available = True
+            self.mode = "transformer"
+            print(f"✅ Loaded transformer classifier: {load_target}")
+        except Exception as exc:
+            self.available = False
+            self.mode = "fallback"
+            self.tokenizer = None
+            self.model = None
+            print(f"⚠️ Failed to load transformer classifier. Using fallback mode: {exc}")
+
+    def predict(self, text: str) -> Dict[str, Any]:
         """
-        Simple keyword extraction fallback using TF-IDF style scoring.
+        Main public method.
         """
-        # Simple stopwords
-        stopwords = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-            'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has',
-            'had', 'do', 'does', 'did', 'will', 'would', 'should', 'could',
-            'may', 'might', 'must', 'can', 'this', 'that', 'these', 'those',
-            'i', 'you', 'he', 'she', 'it', 'we', 'they', 'me', 'him', 'her',
-            'us', 'them', 'my', 'your', 'his', 'its', 'our', 'their', 'of',
-            'with', 'from', 'by', 'about', 'as', 'into', 'like', 'through',
-            'after', 'over', 'between', 'out', 'up', 'down', 'off', 'under'
-        }
-        
-        # Split into words
-        words = text.split()
-        word_scores = {}
-        total_words = len(words)
-        
-        # Simple importance based on length and position
-        for i, word in enumerate(words):
-            clean_word = word.lower().strip('.,!?;:""\'()[]{}')
-            if len(clean_word) > 3 and clean_word not in stopwords:
-                # Boost score for words that appear near the beginning
-                position_boost = 1.0 + (0.5 * (1 - i/total_words))
-                word_scores[clean_word] = word_scores.get(clean_word, 0) + position_boost
-        
-        # Normalize scores
-        max_score = max(word_scores.values()) if word_scores else 1
-        phrases = [{'phrase': word, 'score': score / max_score} 
-                  for word, score in word_scores.items()]
-        
-        # Sort by score
-        phrases.sort(key=lambda x: x['score'], reverse=True)
-        return phrases[:top_k]
-    
+        return self.classify(text)
+
+    def __call__(self, text: str) -> Dict[str, Any]:
+        return self.classify(text)
+
     def classify(self, text: str) -> Dict[str, Any]:
         """
-        Main classification method that combines stance and key phrases.
+        Returns a stable result dictionary.
         """
-        # Get stance scores
-        stance_scores = self.predict_stance(text)
-        
-        if not stance_scores:
+        clean_text = (text or "").strip()
+
+        if not clean_text:
             return {
+                "label": "LOW_RISK",
                 "stance": "neutral",
-                "confidence": 0.5,
-                "risk_score": 0.3,
-                "key_phrases": [],
-                "stance_scores": {}
+                "confidence": 0.55,
+                "risk_score": 0.05,
+                "probability": 0.05,
+                "explanation": "No text provided.",
+                "model_name": "fallback-empty",
+                "mode": self.mode,
             }
-        
-        # Determine primary stance
-        stance_map = {
-            "This text is spreading misinformation.": "spreading",
-            "This text is fact-checking or debunking misinformation.": "debunking",
-            "This text is neutral or educational.": "neutral",
-            "This text is satirical or parody.": "satire",
-            "This text is promoting a conspiracy theory.": "spreading",
-            "This text is citing scientific evidence.": "credible",
-            "This text is expressing a personal opinion.": "neutral",
-            "This text is reporting news factually.": "credible"
-        }
-        
-        # Find the hypothesis with highest score
-        best_hypothesis = max(stance_scores, key=stance_scores.get)
-        stance = stance_map.get(best_hypothesis, "neutral")
-        confidence = stance_scores[best_hypothesis]
-        
-        # Extract key phrases
-        key_phrases = self.extract_key_phrases(text)
-        
-        # Calculate risk score based on stance
-        if stance == "spreading":
-            risk_score = 0.7 + (confidence * 0.28)  # 0.7 to 0.98
-        elif stance == "debunking":
-            risk_score = 0.1 + (confidence * 0.2)   # 0.1 to 0.3
-        elif stance == "credible":
-            risk_score = 0.05 + (confidence * 0.15) # 0.05 to 0.2
-        elif stance == "satire":
-            risk_score = 0.1 + (confidence * 0.1)   # 0.1 to 0.2
-        else:  # neutral
-            risk_score = 0.3 + (confidence * 0.3)   # 0.3 to 0.6
-        
-        # Log classification for debugging
-        print(f"🤖 BERT classified as: {stance} (confidence: {confidence:.2f}, risk: {risk_score:.2f})")
-        
+
+        if self.available and self.tokenizer is not None and self.model is not None:
+            try:
+                return self._predict_transformer(clean_text)
+            except Exception as exc:
+                print(f"⚠️ Transformer inference failed. Falling back to rules: {exc}")
+
+        return self._predict_fallback(clean_text)
+
+    def _predict_transformer(self, text: str) -> Dict[str, Any]:
+        """
+        Transformer prediction path.
+        This remains conservative and still outputs schema-safe stance values.
+        """
+        assert self.tokenizer is not None
+        assert self.model is not None
+        assert torch is not None
+
+        inputs = self.tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=True,
+            padding=True,
+            max_length=256,
+        )
+
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            logits = outputs.logits
+            probs = torch.softmax(logits, dim=-1).cpu().numpy()[0].tolist()
+
+        # Generic handling for binary or multi-class heads
+        if len(probs) == 2:
+            # Assume index 1 = risky / misinfo-like
+            risk_score = float(probs[1])
+        else:
+            # Conservative: use max non-zero-class probability as risk
+            risk_score = float(max(probs[1:])) if len(probs) > 1 else float(probs[0])
+
+        risk_score = _clip01(risk_score)
+
+        if risk_score >= 0.75:
+            label = "MISINFORMATION"
+            stance = "spreading"
+            confidence = risk_score
+            explanation = "Transformer classifier found strong misinformation-like patterns."
+        elif risk_score >= 0.45:
+            label = "WARNING"
+            stance = "warning"
+            confidence = max(risk_score, 0.55)
+            explanation = "Transformer classifier found suspicious or misleading patterns."
+        else:
+            label = "LOW_RISK"
+            stance = "neutral"
+            confidence = max(1.0 - risk_score, 0.55)
+            explanation = "Transformer classifier found low-risk or ordinary content."
+
         return {
-            "stance": stance,
-            "confidence": confidence,
-            "risk_score": min(risk_score, 0.98),
-            "key_phrases": key_phrases,
-            "stance_scores": stance_scores,
-            "best_hypothesis": best_hypothesis
+            "label": label,
+            "stance": _normalise_stance(stance),
+            "confidence": _clip01(confidence),
+            "risk_score": risk_score,
+            "probability": risk_score,
+            "explanation": explanation,
+            "model_name": self.local_model_dir or self.model_name,
+            "mode": "transformer",
+        }
+
+    def _predict_fallback(self, text: str) -> Dict[str, Any]:
+        """
+        Rule-based fallback path.
+        """
+        lower = text.lower()
+
+        debunk_keywords = [
+            "fact check",
+            "fact-check",
+            "debunk",
+            "debunked",
+            "false claim",
+            "misleading",
+            "no evidence",
+            "this is false",
+            "not true",
+            "hoax",
+            "rumour",
+            "rumor",
+            "according to reuters",
+            "according to ap",
+            "according to bbc",
+        ]
+
+        strong_misinfo_keywords = [
+            "secret cure",
+            "cover-up",
+            "what they don't want you to know",
+            "mainstream media won't tell you",
+            "microchip",
+            "5g caused",
+            "stolen election proof",
+            "deep state",
+            "bioweapon",
+            "fake virus",
+            "do your own research",
+            "share before they delete this",
+        ]
+
+        suspicious_keywords = [
+            "urgent",
+            "breaking",
+            "shocking",
+            "exposed",
+            "wake up",
+            "share this",
+            "they are hiding",
+            "they lied",
+            "massive fraud",
+            "suppressed",
+            "banned truth",
+            "poison",
+            "scamdemic",
+            "plandemic",
+        ]
+
+        caution_keywords = [
+            "alleged",
+            "unverified",
+            "reportedly",
+            "claims that",
+            "could be",
+            "may be",
+        ]
+
+        positive_credible_keywords = [
+            "official statement",
+            "according to the cdc",
+            "according to who",
+            "according to nhs",
+            "according to reuters",
+            "according to the associated press",
+            "court records show",
+            "published study",
+            "peer reviewed",
+        ]
+
+        debunk_hits = sum(1 for k in debunk_keywords if k in lower)
+        strong_hits = sum(1 for k in strong_misinfo_keywords if k in lower)
+        suspicious_hits = sum(1 for k in suspicious_keywords if k in lower)
+        caution_hits = sum(1 for k in caution_keywords if k in lower)
+        positive_hits = sum(1 for k in positive_credible_keywords if k in lower)
+
+        # Extra pattern scoring
+        all_caps_words = re.findall(r"\b[A-Z]{4,}\b", text)
+        exclamations = text.count("!")
+        urls = len(re.findall(r"https?://|www\.", lower))
+        questions = text.count("?")
+
+        risk_score = 0.08
+
+        risk_score += strong_hits * 0.20
+        risk_score += suspicious_hits * 0.10
+        risk_score += caution_hits * 0.03
+        risk_score += min(len(all_caps_words), 5) * 0.02
+        risk_score += min(exclamations, 5) * 0.015
+        risk_score += min(questions, 4) * 0.01
+
+        # URLs alone are not bad, but lots of links in chain-message style can be noisy
+        if urls >= 3:
+            risk_score += 0.04
+
+        # Debunking and authoritative language should reduce risk
+        risk_score -= debunk_hits * 0.18
+        risk_score -= positive_hits * 0.08
+
+        risk_score = _clip01(risk_score)
+
+        # Determine stance and label
+        if debunk_hits >= 1 and strong_hits >= 1:
+            stance = "debunking"
+            label = "DEBUNKING"
+            confidence = 0.78
+            risk_score = min(risk_score, 0.20)
+            explanation = "The text appears to discuss or debunk a misleading claim."
+        elif risk_score >= 0.68:
+            stance = "spreading"
+            label = "MISINFORMATION"
+            confidence = max(0.72, risk_score)
+            explanation = "The text contains strong misinformation-like or conspiratorial patterns."
+        elif risk_score >= 0.35:
+            stance = "warning"
+            label = "WARNING"
+            confidence = max(0.58, risk_score)
+            explanation = "The text contains suspicious or unverifiable patterns and should be checked."
+        else:
+            stance = "neutral"
+            label = "LOW_RISK"
+            confidence = max(0.60, 1.0 - risk_score)
+            explanation = "The text appears ordinary, corrective, or low risk."
+
+        return {
+            "label": label,
+            "stance": _normalise_stance(stance),
+            "confidence": _clip01(confidence),
+            "risk_score": _clip01(risk_score),
+            "probability": _clip01(risk_score),
+            "explanation": explanation,
+            "model_name": "fallback-rules",
+            "mode": "fallback",
+            "signals": {
+                "debunk_hits": debunk_hits,
+                "strong_hits": strong_hits,
+                "suspicious_hits": suspicious_hits,
+                "caution_hits": caution_hits,
+                "positive_hits": positive_hits,
+            },
         }

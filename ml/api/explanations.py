@@ -2,6 +2,7 @@
 LLM-based explanation generation using Ollama.
 Provides offline explanations without internet verification.
 """
+
 import json
 import urllib.request
 import re
@@ -37,6 +38,210 @@ def _clamp01(x: float) -> float:
         return 0.0
 
 
+def _risk_level_from_prob(prob_pos: float) -> str:
+    """
+    Determine risk level using the same thresholds as the frontend.
+    """
+    prob_percent = int(round(prob_pos * 100))
+    if prob_percent >= 45:
+        return "high"
+    if prob_percent >= 15:
+        return "medium"
+    return "low"
+
+
+def _default_guidance_for_risk(risk_level: str) -> str:
+    r = str(risk_level or "medium").lower()
+    if r == "high":
+        return "High-risk signal. Do not share until the claim has been checked against trusted primary sources."
+    if r == "medium":
+        return "Medium-risk signal. Verify key claims using trusted sources before sharing."
+    return "Low-risk signal. Sharing risk appears lower, but still verify if the claim is high-impact or time-sensitive."
+
+
+def _guidance_for_current_risk(guidance: str, risk_level: str) -> str:
+    """
+    Prevent stale LOW-risk guidance from being reused when the current case is MEDIUM/HIGH.
+    """
+    incoming = (guidance or "").strip()
+    if not incoming:
+        return _default_guidance_for_risk(risk_level)
+
+    low_markers = [
+        "low-risk signal",
+        "sharing risk appears lower",
+    ]
+    medium_markers = [
+        "medium-risk signal",
+        "verify key claims",
+    ]
+    high_markers = [
+        "high-risk signal",
+        "do not share until",
+    ]
+
+    lowered = incoming.lower()
+
+    if risk_level == "high":
+        if any(m in lowered for m in low_markers + medium_markers):
+            return _default_guidance_for_risk("high")
+        return incoming
+
+    if risk_level == "medium":
+        if any(m in lowered for m in low_markers) and not any(m in lowered for m in medium_markers):
+            return _default_guidance_for_risk("medium")
+        return incoming
+
+    # low
+    if any(m in lowered for m in high_markers):
+        return _default_guidance_for_risk("low")
+    return incoming
+
+
+def _build_concern_sentence(
+    risk_level: str,
+    stance: str,
+    triggers: Optional[List[Dict]] = None,
+    key_phrases: Optional[List[Dict]] = None,
+) -> str:
+    triggers = triggers or []
+    key_phrases = key_phrases or []
+
+    trigger_names = [str(t.get("name", "")).strip() for t in triggers[:2] if str(t.get("name", "")).strip()]
+    phrases = [f"\"{p['phrase']}\"" for p in key_phrases[:2] if isinstance(p, dict) and p.get("phrase")]
+
+    if risk_level == "low":
+        if stance in {"credible", "warning", "debunking"}:
+            return (
+                "However, the wording appears broadly consistent with credible or corrective information, "
+                "even though the text itself does not present detailed citations."
+            )
+        if phrases:
+            return (
+                f"However, the wording remains generally consistent with established information, with phrases such as "
+                f"{', '.join(phrases)} suggesting an informational rather than misleading tone."
+            )
+        return (
+            "However, the wording appears broadly consistent with established information, even though the text itself does not include detailed supporting citations."
+        )
+
+    if risk_level == "medium":
+        if trigger_names:
+            joined = " and ".join(name.lower() for name in trigger_names[:2])
+            return (
+                f"However, some aspects of the language, including {joined}, introduce uncertainty about how reliably the claims are supported."
+            )
+        if phrases:
+            return (
+                f"However, some phrases such as {', '.join(phrases)} may require additional context or supporting evidence to assess the claims confidently."
+            )
+        return (
+            "However, some parts of the message lack enough context or supporting detail, which makes the credibility of the claims less certain."
+        )
+
+    if trigger_names:
+        joined = " and ".join(name.lower() for name in trigger_names[:2])
+        return (
+            f"However, the language pattern, including {joined}, raises concerns about the credibility and reliability of these claims."
+        )
+    if phrases:
+        return (
+            f"However, phrases such as {', '.join(phrases)} raise concerns that the claims may be framed in a misleading or unsupported way."
+        )
+    return (
+        "However, the lack of verifiable sourcing and the style of the message raise concerns about the credibility of these claims."
+    )
+
+
+def _build_implication_sentence(
+    risk_level: str,
+    stance: str,
+    phrase_detail: str = "",
+) -> str:
+    if risk_level == "high":
+        return (
+            f"This suggests that the report may be based on unverified claims or biased interpretations rather than verifiable evidence{phrase_detail}."
+        )
+
+    if risk_level == "medium":
+        return (
+            f"This suggests that the content contains elements that could be either factual or misleading without further verification{phrase_detail}."
+        )
+
+    if stance in {"credible", "warning", "debunking"}:
+        return (
+            "This suggests that the content is more likely to reflect established knowledge, corrective framing, or responsible discussion rather than misinformation."
+        )
+
+    return (
+        "This suggests that the content is more likely to reflect generally reliable or widely accepted information, although important claims should still be checked where necessary."
+    )
+
+
+def _clean_summary_for_risk(
+    summary: str,
+    risk_level_text: str,
+    prob_percent: int,
+    stance: str = "neutral",
+) -> str:
+    """
+    Clean and normalize LLM output without corrupting percentages that belong
+    to the original claim text (e.g. "10% of the brain").
+    """
+    if not summary:
+        return summary
+
+    summary = re.sub(r"\bhigh risk\b", f"{risk_level_text} risk", summary, flags=re.IGNORECASE)
+    summary = re.sub(r"\bmedium risk\b", f"{risk_level_text} risk", summary, flags=re.IGNORECASE)
+    summary = re.sub(r"\blow risk\b", f"{risk_level_text} risk", summary, flags=re.IGNORECASE)
+
+    # Only replace the percentage when it appears in the specific probability phrase.
+    summary = re.sub(
+        r"(estimated probability of\s*)\d+%",
+        rf"\g<1>{prob_percent}%",
+        summary,
+        flags=re.IGNORECASE,
+        count=1,
+    )
+
+    # Also normalise this alternative wording if the LLM uses it.
+    summary = re.sub(
+        r"(estimated misinformation likelihood is\s*)\d+%",
+        rf"\g<1>{prob_percent}%",
+        summary,
+        flags=re.IGNORECASE,
+        count=1,
+    )
+
+    # IMPORTANT:
+    # Do NOT replace the first generic percentage in the text.
+    # That was corrupting factual claim text like "10% of the brain" into "17%".
+
+    if risk_level_text == "low":
+        summary = re.sub(
+            r"However,\s*the lack of (official statements?|verifiable sources?|specific details?|specific data or sources?) raises concerns about the credibility of these claims\.",
+            "However, the wording appears broadly consistent with established information, even if the text itself does not provide detailed supporting citations.",
+            summary,
+            flags=re.IGNORECASE,
+        )
+        summary = re.sub(
+            r"raises concerns about the credibility of these claims",
+            "does not by itself reduce the overall credibility of the message",
+            summary,
+            flags=re.IGNORECASE,
+        )
+
+        if stance in {"credible", "warning", "debunking"}:
+            summary = re.sub(
+                r"This suggests that the report may be based on speculation or biased interpretations rather than verifiable evidence\.",
+                "This suggests that the content is more likely to reflect corrective, credible, or well-established information rather than misinformation.",
+                summary,
+                flags=re.IGNORECASE,
+            )
+
+    return summary.strip()
+
+
 def _build_explanation_prompt(
     text: str,
     verdict: str,
@@ -50,30 +255,28 @@ def _build_explanation_prompt(
     triggers: List[Dict] = None,
     key_phrases: List[Dict] = None,
 ) -> str:
-    """
-    Build prompt for explanation generation with stance awareness and triggers.
-    Designed to generate longer, detailed explanations (4-5 sentences).
-    """
+    triggers = triggers or []
+    key_phrases = key_phrases or []
 
-    # Format triggers for prompt
     trigger_text = ""
     if triggers:
         trigger_text = "Detected patterns:\n"
         for t in triggers[:3]:
             trigger_text += (
-                f"- {t.get('name', 'Unknown')}: {int(t.get('score', 0)*100)}% - "
+                f"- {t.get('name', 'Unknown')}: {int(t.get('score', 0) * 100)}% - "
                 f"{t.get('explanation', '')}\n"
             )
 
-    # Format key phrases
     key_phrases_text = ""
     if key_phrases:
-        phrase_words = [f"\"{p['phrase']}\"" for p in key_phrases[:3]]
-        key_phrases_text = f"Key phrases detected: {', '.join(phrase_words)}."
+        phrase_words = [f"\"{p['phrase']}\"" for p in key_phrases[:3] if isinstance(p, dict) and p.get("phrase")]
+        if phrase_words:
+            key_phrases_text = f"Key phrases detected: {', '.join(phrase_words)}."
 
-    # Adjust prompt based on stance
     if stance == "debunking":
-        stance_context = "This is fact-checking or educational content that discusses misinformation rather than spreading it."
+        stance_context = (
+            "This is fact-checking or educational content that discusses misinformation rather than spreading it."
+        )
     elif stance == "spreading":
         stance_context = "This content shows patterns of spreading unverified claims."
     elif stance == "warning":
@@ -81,19 +284,48 @@ def _build_explanation_prompt(
     elif stance == "satire":
         stance_context = "This is satirical or parody content."
     elif stance == "credible":
-        stance_context = "This content cites official sources."
+        stance_context = "This content cites official or credible information."
     else:
         stance_context = "This content appears neutral in tone."
 
-    # Use ROUND to match frontend display (Math.round(prob*100))
     prob_percent = int(round(prob_pos * 100))
+    risk_level_text = _risk_level_from_prob(prob_pos)
+    guidance = _guidance_for_current_risk(guidance, risk_level_text)
+
+    if risk_level_text == "low":
+        credibility_instruction = (
+            "IMPORTANT: Because the risk is LOW, do not use strongly negative wording such as "
+            "'raises concerns about credibility', 'unverified', or 'speculation' unless the text clearly deserves it. "
+            "Frame the explanation as broadly consistent, generally reliable, or aligned with established knowledge."
+        )
+    elif risk_level_text == "medium":
+        credibility_instruction = (
+            "IMPORTANT: Because the risk is MEDIUM, use balanced wording. Do not overstate either certainty or falsehood."
+        )
+    else:
+        credibility_instruction = (
+            "IMPORTANT: Because the risk is HIGH, clearly explain that the content shows patterns associated with misleading or unsupported claims."
+        )
+
+    example_concern = _build_concern_sentence(
+        risk_level=risk_level_text,
+        stance=stance,
+        triggers=triggers,
+        key_phrases=key_phrases,
+    )
+
+    example_implication = _build_implication_sentence(
+        risk_level=risk_level_text,
+        stance=stance,
+        phrase_detail="",
+    )
 
     return f"""
 You are an OFFLINE explanation module for a misinformation-risk detection system.
 You do NOT have internet access and MUST NOT claim you verified real-world facts.
 
-Your job: Write a DETAILED, "report-style" explanation based ONLY on the input text and model outputs.
-The explanation MUST be 4-5 sentences long - structured exactly like the example below.
+Your job: Write a DETAILED, report-style explanation based ONLY on the input text and model outputs.
+The explanation MUST be 4-5 sentences long.
 
 Return ONLY VALID JSON. No markdown. No extra text.
 
@@ -107,28 +339,36 @@ MODEL_OUTPUT:
 - risk_band: {risk_band}
 - prob_misinformation: {prob_pos:.6f} ({prob_percent}%)
 - prob_non_misinformation: {prob_neg:.6f}
-- spread_potential: {early_prob if early_prob else 'null'}
+- spread_potential: {early_prob if early_prob is not None else 'null'}
 - {key_phrases_text}
 
 {trigger_text}
 
+{credibility_instruction}
+
+IMPORTANT FACTUAL WRITING RULE:
+- If the input text contains a percentage as part of the claim itself (for example "10% of the brain"),
+  do NOT replace that claim percentage with the model probability.
+- The model probability ({prob_percent}%) should only appear when describing misinformation risk,
+  not when restating the user's claim.
+
 Return JSON exactly matching this schema:
 {{
-  "user_summary": "A DETAILED paragraph (4-5 sentences) that follows this exact format: Sentence 1: 'The text reports on [main topic/claim].' Sentence 2: 'However, [specific concern about credibility].' Sentence 3: 'The model outputs indicate a [low/medium/high] risk of misinformation, with an estimated probability of [X]%.' Sentence 4: 'This suggests that [explain what this means].' Sentence 5: 'As such, it is essential to [guidance].'",
+  "user_summary": "A DETAILED paragraph of 4-5 sentences. Sentence 1 should summarise the main topic or claim. Sentence 2 should describe a credibility/context concern OR supporting context in a way that matches the risk level. Sentence 3 should state the {risk_level_text} risk of misinformation with an estimated probability of {prob_percent}%. Sentence 4 should explain what that means. Sentence 5 should give practical guidance.",
   "user_reasons": ["2-3 bullet points explaining the main signals"],
   "user_guidance": "{guidance}",
   "final_explanation": "The same as user_summary (for backward compatibility)",
   "signals": {{}}
 }}
 
-EXAMPLE OF CORRECT FORMAT:
-"The text reports on unconfirmed information regarding the prime minister's resignation, citing a secret meeting and internal party conflict. However, the lack of an official statement and unspecified sources raises concerns about the credibility of these claims. The model outputs indicate a high risk of misinformation, with an estimated probability of 92%. This suggests that the report may be based on speculation or biased interpretations rather than verifiable evidence. As such, it is essential to exercise caution when engaging with this content and seek primary evidence from official sources before sharing or accepting these claims."
+EXAMPLE OF APPROPRIATE WORDING FOR THIS CASE:
+"The text reports on the main claim in a clear and informative way. {example_concern} The model outputs indicate a {risk_level_text} risk of misinformation, with an estimated probability of {prob_percent}%. {example_implication} As such, it is essential to {guidance if guidance else _default_guidance_for_risk(risk_level_text)}"
 
 CRITICAL FORMATTING RULES:
 - The explanation MUST be 4-5 sentences long
-- Follow the exact structure: topic sentence, concern sentence, probability sentence, implication sentence, guidance sentence
 - Use professional, neutral language
-- For {prob_percent}% probability, use appropriate risk level
+- Keep the explanation consistent with the reported probability and risk level
+- Do not make low-risk content sound misleading without strong textual evidence
 """
 
 
@@ -145,26 +385,14 @@ def generate_explanation(
     triggers: Optional[List[Dict]] = None,
     key_phrases: Optional[List[Dict]] = None,
 ) -> Dict[str, Any]:
-    """
-    Generate user-friendly explanation using LLM with stance awareness and triggers.
-    This version ensures consistency between risk level display and content analysis.
-    """
     signals = signals or {}
     triggers = triggers or []
     key_phrases = key_phrases or []
 
-    # Use ROUND to match frontend display (Math.round(prob*100))
     prob_percent = int(round(prob_pos * 100))
-
-    # Determine risk level based on probability - MATCH FRONTEND THRESHOLDS
-    if prob_percent >= 45:
-        risk_level_text = "high"
-    elif prob_percent >= 15:
-        risk_level_text = "medium"
-    else:
-        risk_level_text = "low"
-
+    risk_level_text = _risk_level_from_prob(prob_pos)
     forced_risk_band = risk_level_text.upper()
+    safe_guidance = _guidance_for_current_risk(guidance, risk_level_text)
 
     prompt = _build_explanation_prompt(
         text=text,
@@ -174,7 +402,7 @@ def generate_explanation(
         prob_neg=prob_neg,
         early_prob=early_prob,
         signals=signals,
-        guidance=guidance,
+        guidance=safe_guidance,
         stance=stance,
         triggers=triggers,
         key_phrases=key_phrases,
@@ -194,7 +422,6 @@ def generate_explanation(
         res = _post_json(f"{OLLAMA_BASE}/api/generate", payload, timeout=90)
         raw = (res.get("response") or "").strip()
 
-        # Try to extract JSON if there's extra text
         if not raw.startswith("{"):
             start = raw.find("{")
             end = raw.rfind("}")
@@ -203,48 +430,38 @@ def generate_explanation(
 
         data = json.loads(raw)
 
-        user_summary = str(data.get("user_summary", ""))[:1000]
-
-        # ENSURE the summary uses the correct risk level
-        if "high risk" in user_summary.lower() and risk_level_text != "high":
-            user_summary = re.sub(r"high risk", f"{risk_level_text} risk", user_summary, flags=re.IGNORECASE)
-        elif "medium risk" in user_summary.lower() and risk_level_text != "medium":
-            user_summary = re.sub(r"medium risk", f"{risk_level_text} risk", user_summary, flags=re.IGNORECASE)
-        elif "low risk" in user_summary.lower() and risk_level_text != "low":
-            user_summary = re.sub(r"low risk", f"{risk_level_text} risk", user_summary, flags=re.IGNORECASE)
-
-        # Ensure probability is consistent.
-        fixed = re.sub(
-            r"(estimated probability of\s*)\d+%",
-            rf"\g<1>{prob_percent}%",
-            user_summary,
-            flags=re.IGNORECASE,
-            count=1,
+        user_summary = str(data.get("user_summary", "")).strip()[:1000]
+        user_summary = _clean_summary_for_risk(
+            summary=user_summary,
+            risk_level_text=risk_level_text,
+            prob_percent=prob_percent,
+            stance=stance,
         )
-        if fixed != user_summary:
-            user_summary = fixed
-        else:
-            # Fallback: replace first % we see
-            matches = re.findall(r"(\d+)%", user_summary)
-            if matches and int(matches[0]) != prob_percent:
-                old_percent = matches[0]
-                user_summary = user_summary.replace(f"{old_percent}%", f"{prob_percent}%", 1)
 
         user_reasons = [str(x).strip()[:240] for x in data.get("user_reasons", []) if x][:3]
-        user_guidance = str(data.get("user_guidance", guidance))[:300]
-        final_explanation = str(data.get("final_explanation", ""))[:1200]
+        user_guidance = str(data.get("user_guidance", safe_guidance)).strip()[:300]
+        user_guidance = _guidance_for_current_risk(user_guidance, risk_level_text)
+        final_explanation = str(data.get("final_explanation", "")).strip()[:1200]
 
-        # If LLM failed or summary is too short, use fallback
         if not user_summary or len([s for s in user_summary.split(".") if s.strip()]) < 3:
             user_summary = _build_fallback_explanation(
-                text, prob_pos, risk_band, stance, triggers, key_phrases, guidance
+                text=text,
+                prob_pos=prob_pos,
+                risk_band=forced_risk_band,
+                stance=stance,
+                triggers=triggers,
+                key_phrases=key_phrases,
+                guidance=safe_guidance,
             )
+
+        if not final_explanation:
+            final_explanation = user_summary
 
         return {
             "user_summary": user_summary,
-            "user_reasons": user_reasons or [t.get("explanation", "") for t in triggers[:2]],
-            "user_guidance": user_guidance or guidance,
-            "final_explanation": final_explanation or user_summary,
+            "user_reasons": user_reasons or [t.get("explanation", "") for t in triggers[:2] if t.get("explanation")],
+            "user_guidance": user_guidance,
+            "final_explanation": final_explanation,
             "signals": signals,
             "triggers": triggers,
             "key_phrases": key_phrases,
@@ -254,13 +471,19 @@ def generate_explanation(
         print(f"⚠️ LLM explanation failed, using detailed fallback: {e}")
 
         user_summary = _build_fallback_explanation(
-            text, prob_pos, risk_band, stance, triggers, key_phrases, guidance
+            text=text,
+            prob_pos=prob_pos,
+            risk_band=forced_risk_band,
+            stance=stance,
+            triggers=triggers,
+            key_phrases=key_phrases,
+            guidance=safe_guidance,
         )
 
         return {
             "user_summary": user_summary,
-            "user_reasons": [t.get("explanation", "") for t in triggers[:2]],
-            "user_guidance": guidance,
+            "user_reasons": [t.get("explanation", "") for t in triggers[:2] if t.get("explanation")],
+            "user_guidance": safe_guidance,
             "final_explanation": user_summary,
             "signals": signals,
             "triggers": triggers,
@@ -277,32 +500,11 @@ def _build_fallback_explanation(
     key_phrases: List[Dict],
     guidance: str,
 ) -> str:
-    """
-    Build a detailed fallback explanation (4-5 sentences) matching the exact format.
-    """
-    # Use ROUND to match frontend display
     prob_percent = int(round(prob_pos * 100))
-
-    # Determine risk level based on probability - MATCH FRONTEND THRESHOLDS
-    if prob_percent >= 45:
-        risk_level = "high"
-    elif prob_percent >= 15:
-        risk_level = "medium"
-    else:
-        risk_level = "low"
+    risk_level = _risk_level_from_prob(prob_pos)
 
     words = text.split()
-    topic = (" ".join(words[:8]) + "...") if len(words) > 8 else text
-
-    concern = ""
-    if triggers:
-        trigger_names = [t.get("name", "") for t in triggers[:2] if t.get("name")]
-        if trigger_names:
-            concern = (
-                f"citing {trigger_names[0].lower()}"
-                if len(trigger_names) == 1
-                else f"citing {trigger_names[0].lower()} and {trigger_names[1].lower()}"
-            )
+    topic = (" ".join(words[:12]) + "...") if len(words) > 12 else text
 
     phrase_detail = ""
     if key_phrases:
@@ -310,51 +512,38 @@ def _build_fallback_explanation(
         if phrases:
             phrase_detail = f" based on detected phrases like {', '.join(phrases)}"
 
-    sentences = []
-    sentences.append(f"The text reports on {topic}.")
-    if concern:
-        sentences.append(
-            f"However, the pattern of language used, {concern}, raises concerns about the credibility of these claims."
-        )
-    else:
-        sentences.append(
-            "However, the lack of verifiable sources and specific details raises concerns about the credibility of these claims."
-        )
-
-    sentences.append(
-        f"The model outputs indicate a {risk_level} risk of misinformation, with an estimated probability of {prob_percent}%."
+    concern_sentence = _build_concern_sentence(
+        risk_level=risk_level,
+        stance=stance,
+        triggers=triggers,
+        key_phrases=key_phrases,
     )
 
-    if prob_percent >= 45:
-        sentences.append(
-            f"This suggests that the report may be based on unverified claims or biased interpretations rather than verifiable evidence{phrase_detail}."
-        )
-    elif prob_percent >= 15:
-        sentences.append(
-            f"This suggests that the content contains elements that could be either factual or misleading{phrase_detail}."
-        )
-    else:
-        sentences.append(
-            "This suggests that the content appears to be generally reliable, though it's always good practice to verify important claims."
-        )
+    implication_sentence = _build_implication_sentence(
+        risk_level=risk_level,
+        stance=stance,
+        phrase_detail=phrase_detail if risk_level in {"medium", "high"} else "",
+    )
 
-    clean_guidance = (guidance or "").strip()
+    clean_guidance = _guidance_for_current_risk(guidance, risk_level)
     if not clean_guidance:
-        clean_guidance = "verify key claims before sharing."
+        clean_guidance = _default_guidance_for_risk(risk_level)
 
-    # Ensure it ends nicely
     if not clean_guidance.endswith("."):
         clean_guidance = clean_guidance.rstrip() + "."
 
-    sentences.append(f"As such, it is essential to {clean_guidance}")
+    sentences = [
+        f"The text reports on {topic}.",
+        concern_sentence,
+        f"The model outputs indicate a {risk_level} risk of misinformation, with an estimated probability of {prob_percent}%.",
+        implication_sentence,
+        f"As such, it is essential to {clean_guidance}",
+    ]
 
     return " ".join(sentences)
 
 
 def _build_analyst_prompt(text: str, verdict: str, risk_band: str, prob_pos: float, stance: str = "neutral") -> str:
-    """
-    Build prompt for analyst-style explanation with stance awareness.
-    """
     return f"""
 You are an OFFLINE analyst module for a misinformation-risk detection system.
 You do NOT have internet access and MUST NOT claim you verified real-world facts.
@@ -405,7 +594,6 @@ CONSTRAINTS:
 
 
 def _normalize_triggers(triggers: List[Dict], stance: str = "neutral") -> List[Dict]:
-    """Clean and deduplicate triggers with stance-appropriate language"""
     cleaned = []
     seen = set()
 
@@ -425,7 +613,6 @@ def _normalize_triggers(triggers: List[Dict], stance: str = "neutral") -> List[D
             seen.add(name.lower())
             cleaned.append({"name": name, "score": score, "explanation": explanation})
 
-    # Ensure exactly 3 triggers with stance-appropriate fallbacks
     if stance == "debunking":
         fallback_pool = [
             ("Topic Engagement", 0.45, "Health topics naturally attract attention and discussion online."),
@@ -461,9 +648,6 @@ def generate_analyst(
     prob_pos: float,
     stance: str = "neutral",
 ) -> Dict[str, Any]:
-    """
-    Generate analyst-focused analysis using LLM with stance awareness.
-    """
     prompt = _build_analyst_prompt(
         text=text,
         verdict=verdict,
@@ -529,7 +713,7 @@ def generate_analyst(
 
         except Exception as e:
             last_err = e
-            print(f"⚠️ Analyst generation attempt {attempt+1} failed: {e}")
+            print(f"⚠️ Analyst generation attempt {attempt + 1} failed: {e}")
 
     print(f"⚠️ Using final fallback for analyst: {last_err}")
     return {

@@ -1,209 +1,215 @@
-# ml/api/predict_service.py
 from __future__ import annotations
 
-import traceback
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
-import pandas as pd
-
+from .analysis import (
+    build_algorithmic_advantage,
+    build_propagation_dynamics,
+    build_susceptibility_logic,
+    build_trigger_breakdown,
+)
+from .explanations import generate_analyst, generate_explanation
+from .internet_verifier import verify_text_on_web
 from .models import (
+    control_action,
+    make_feature_frame,
     norm_text,
     predict_probs_unified,
     risk_band,
-    control_action,
 )
-from .analysis import (
-    build_trigger_breakdown,
-    build_propagation_dynamics,
-    build_susceptibility_logic,
-    build_algorithmic_advantage,
-)
-from .stance_detector import detect_stance, adjust_risk_by_stance
-from .explanations import generate_analyst, generate_explanation
+from .stance_detector import adjust_risk_by_stance, detect_stance
 
 
-# ============================================================================
-# Enhanced early-warning features 
-# ============================================================================
 def extract_enhanced_features(text: str) -> Dict[str, float]:
     import re
 
     t = text or ""
     text_lower = t.lower()
 
-    features = {
+    sentence_count = max(1, len(re.findall(r"[.!?]+", t)) or 1)
+    word_count = max(1, len(re.findall(r"\b\w+\b", t)))
+
+    share_phrases = [
+        "share",
+        "share this",
+        "forward this",
+        "retweet",
+        "spread this",
+        "tell everyone",
+        "pass this on",
+        "do your own research",
+    ]
+    urgency_phrases = [
+        "breaking",
+        "urgent",
+        "right now",
+        "immediately",
+        "act now",
+        "just in",
+        "alert",
+    ]
+
+    caps_chars = sum(1 for c in t if c.isupper())
+    alpha_chars = sum(1 for c in t if c.isalpha())
+    caps_ratio = float(caps_chars / alpha_chars) if alpha_chars > 0 else 0.0
+
+    return {
         "text_length": float(len(t)),
         "has_url": 1.0 if re.search(r"http[s]?://|www\.", text_lower) else 0.0,
         "has_question": 1.0 if "?" in t else 0.0,
         "has_exclamation": 1.0 if "!" in t else 0.0,
+        "caps_ratio": caps_ratio,
+        "has_share_phrase": 1.0 if any(p in text_lower for p in share_phrases) else 0.0,
+        "has_urgency_phrase": 1.0 if any(p in text_lower for p in urgency_phrases) else 0.0,
         "has_numbers": 1.0 if re.search(r"\d+", t) else 0.0,
+        "sentiment_score": 0.0,
+        "readability_score": float(word_count / sentence_count),
     }
-
-    share_words = ["share", "forward", "spread", "retweet", "pass", "tell everyone"]
-    share_count = sum(1 for word in share_words if word in text_lower)
-    features["share_prompts"] = min(share_count / 3.0, 1.0)
-
-    urgency_words = ["breaking", "urgent", "just in", "now", "immediately", "right now", "alert"]
-    urgency_count = sum(1 for word in urgency_words if word in text_lower)
-    features["urgency_score"] = min(urgency_count / 3.0, 1.0)
-
-    conspiracy_phrases = ["cover up", "they don't want", "hidden truth", "secret", "what they won't tell"]
-    conspiracy_count = sum(1 for phrase in conspiracy_phrases if phrase in text_lower)
-    features["conspiracy_score"] = min(conspiracy_count / 2.0, 1.0)
-
-    excl_count = t.count("!")
-    ques_count = t.count("?")
-    features["emotional_intensity"] = min((excl_count + ques_count) / 5.0, 1.0)
-
-    if len(t) > 0:
-        caps_count = sum(1 for c in t if c.isupper())
-        features["caps_ratio"] = float(caps_count / len(t))
-        features["caps_emphasis"] = min(features["caps_ratio"] * 2, 1.0)
-    else:
-        features["caps_ratio"] = 0.0
-        features["caps_emphasis"] = 0.0
-
-    virality_components = [
-        features["share_prompts"] * 0.3,
-        features["urgency_score"] * 0.25,
-        features["conspiracy_score"] * 0.2,
-        features["emotional_intensity"] * 0.15,
-        features["caps_emphasis"] * 0.1,
-    ]
-    features["virality_score"] = sum(virality_components)
-    return features
 
 
 def predict_enhanced_early(model: Any, text: str) -> Dict[str, float]:
-    features = extract_enhanced_features(text)
+    """
+    Use the same feature-frame structure expected by the sklearn pipeline.
+    """
+    extra = extract_enhanced_features(text)
+    x = make_feature_frame(text=text, struct=None, extra=extra)
+    prob = float(model.predict_proba(x)[0][1])
 
-    model_features = {
-        "source_text": text,
-        "root_outdeg": 0.0,
-        "num_nodes": 1.0,
-        "num_edges": 0.0,
-        "tree_depth": 0.0,
-        "max_breadth": 1.0,
-        "leaf_nodes": 1.0,
-        "leaf_ratio": 1.0,
-        "avg_outdeg": 0.0,
-        "branching_factor": 0.0,
-        "text_length": features.get("text_length", 0),
-        "has_url": features.get("has_url", 0),
-        "has_question": features.get("has_question", 0),
-        "has_exclamation": features.get("has_exclamation", 0),
-        "has_numbers": features.get("has_numbers", 0),
-        "caps_ratio": features.get("caps_ratio", 0),
-        "has_share_phrase": features.get("share_prompts", 0),
-        "has_urgency_phrase": features.get("urgency_score", 0),
-        "sentiment_score": features.get("emotional_intensity", 0),
-        "readability_score": 0.5,
-    }
-
-    X = pd.DataFrame([model_features])
-
-    try:
-        proba = model.predict_proba(X)[0]
-        model_prob = float(proba[1])
-    except Exception as e:
-        print(f"⚠️ Early model prediction failed: {e} — using fallback")
-        model_prob = 0.3
-
-    virality_score = features.get("virality_score", 0)
-    enhanced_prob = (model_prob * 0.7) + (virality_score * 0.3)
+    virality_inputs = [
+        extra.get("has_share_phrase", 0.0),
+        extra.get("has_urgency_phrase", 0.0),
+        extra.get("has_exclamation", 0.0),
+        extra.get("has_numbers", 0.0),
+    ]
+    virality_score = min(1.0, sum(virality_inputs) / 4.0)
 
     return {
-        "probability": float(enhanced_prob),
-        "model_prob": float(model_prob),
+        "probability": prob,
         "virality_score": float(virality_score),
-        "share_prompts": float(features.get("share_prompts", 0)),
-        "urgency_score": float(features.get("urgency_score", 0)),
     }
 
 
-# ============================================================================
-# Ensemble + verdicts
-# ============================================================================
 def ensemble_prediction(
+    *,
     unified_prob: float,
     enhanced_prob: Optional[float],
     legacy_prob: Optional[float],
-    bert_prob: Optional[float] = None,
-) -> Dict[str, Any]:
-    weights = {
-        "unified": 0.20,
-        "enhanced": 0.20,
-        "legacy": 0.10,
-        "bert": 0.50,
-    }
+    bert_prob: Optional[float],
+) -> Dict[str, float]:
+    probs = [float(unified_prob)]
+    weights = [0.50]
 
-    present = {"unified": unified_prob}
     if enhanced_prob is not None:
-        present["enhanced"] = enhanced_prob
+        probs.append(float(enhanced_prob))
+        weights.append(0.20)
+
     if legacy_prob is not None:
-        present["legacy"] = legacy_prob
+        probs.append(float(legacy_prob))
+        weights.append(0.15)
+
     if bert_prob is not None:
-        present["bert"] = bert_prob
+        probs.append(float(bert_prob))
+        weights.append(0.15)
 
-    total_w = sum(weights[k] for k in present.keys())
-    norm_w = {k: weights[k] / total_w for k in present.keys()}
+    total_weight = sum(weights) if weights else 1.0
+    ensemble = sum(p * w for p, w in zip(probs, weights)) / total_weight
 
-    ensemble_prob = 0.0
-    for k, v in present.items():
-        ensemble_prob += float(v) * norm_w[k]
-
-    return {
-        "ensemble_probability": float(ensemble_prob),
-        "unified_probability": float(unified_prob),
-        "enhanced_probability": float(enhanced_prob) if enhanced_prob is not None else None,
-        "legacy_probability": float(legacy_prob) if legacy_prob is not None else None,
-        "bert_probability": float(bert_prob) if bert_prob is not None else None,
-        "weights": norm_w,
-    }
+    return {"ensemble_probability": float(max(0.0, min(1.0, ensemble)))}
 
 
-def determine_action_verdict(prob_pos: float, text: str) -> Tuple[str, str, Optional[str]]:
-    text_lower = (text or "").lower()
+def compute_model_confidence(
+    *,
+    ensemble_prob: float,
+    model_probs: List[Optional[float]],
+    internet_verification: Optional[Dict[str, Any]] = None,
+) -> float:
+    """
+    Confidence is separate from misinformation likelihood.
 
-    if any(platform in text_lower for platform in ["facebook", "instagram", "whatsapp", "twitter", "meta"]) and \
-       any(word in text_lower for word in ["$", "fee", "charge", "payment", "5.99", "9.99", "month"]) and \
-       any(word in text_lower for word in ["share", "forward", "copy", "paste", "opt out", "pass"]):
-        return (
-            "VERIFY_REQUIRED",
-            "This looks like a common viral hoax where scammers claim platforms will start charging fees.",
-            "⚠️ Pattern: Share-to-opt-out hoax",
-        )
+    It combines:
+    1. Distance from the decision boundary (0.5)
+    2. Agreement between available models
+    3. Optional internet verification confidence boost
+    """
+    p = float(max(0.0, min(1.0, ensemble_prob)))
 
-    if any(celebrity in text_lower for celebrity in ["taylor swift", "beyoncé", "rihanna", "justin bieber", "drake"]) and \
-       any(word in text_lower for word in ["died", "dead", "rip", "passed away", "killed", "crash"]):
+    # Near 0.5 => uncertain, near 0 or 1 => more certain
+    distance_conf = abs(p - 0.5) * 2.0  # 0..1
+
+    usable = [float(x) for x in model_probs if x is not None]
+    if len(usable) >= 2:
+        spread = max(usable) - min(usable)  # 0 means strong agreement
+        agreement_conf = max(0.0, 1.0 - spread)
+    else:
+        agreement_conf = distance_conf
+
+    confidence = (0.65 * distance_conf) + (0.35 * agreement_conf)
+
+    if internet_verification and internet_verification.get("performed"):
+        web_conf = float(internet_verification.get("overall_confidence", 0.0))
+        web_verdict = str(
+            internet_verification.get("overall_verdict", "UNVERIFIED")
+        ).upper()
+
+        if web_verdict in {"LIKELY_TRUE", "LIKELY_FALSE"}:
+            confidence = (0.80 * confidence) + (0.20 * web_conf)
+        elif web_verdict == "MIXED":
+            confidence = min(confidence, 0.65)
+
+    return float(max(0.05, min(0.99, confidence)))
+
+
+def determine_action_verdict(
+    prob: float,
+    text: str,
+    internet_verification: Optional[Dict[str, Any]] = None,
+) -> tuple[str, str, Optional[str]]:
+    lowered = (text or "").lower()
+
+    if internet_verification and internet_verification.get("performed"):
+        overall = internet_verification.get("overall_verdict")
+        conf = float(internet_verification.get("overall_confidence", 0.0))
+
+        if overall == "LIKELY_TRUE" and conf >= 0.75 and prob < 0.15:
+            return (
+                "SAFE_TO_SHARE",
+                "Trusted evidence strongly supports the claims in this content.",
+                "Strong external support",
+            )
+
+        if overall == "LIKELY_FALSE" and conf >= 0.65:
+            return (
+                "LIKELY_MISINFORMATION",
+                "Trusted evidence strongly contradicts the claims in this content.",
+                "Strong external contradiction",
+            )
+
+    if prob >= 0.45:
         return (
             "LIKELY_MISINFORMATION",
-            "Celebrity death claims like this resurface periodically and are almost always false.",
-            "⚠️ Pattern: Celebrity death hoax",
+            "The system detected strong misinformation-related patterns. This content should not be trusted without independent verification.",
+            None,
         )
 
-    if any(word in text_lower for word in ["vaccine", "vax", "shot"]) and \
-       any(word in text_lower for word in ["microchip", "tracking", "5g", "chip", "track"]):
-        return (
-            "LIKELY_MISINFORMATION",
-            "This is a known conspiracy theory that has been debunked by health authorities worldwide.",
-            "⚠️ Pattern: Vaccine conspiracy",
-        )
-
-    if any(word in text_lower for word in ["urgent", "important", "warning", "alert"]) and \
-       any(word in text_lower for word in ["$", "money", "bank", "account", "pay", "fee"]) and \
-       any(word in text_lower for word in ["share", "forward", "tell", "spread"]):
+    if prob >= 0.15:
         return (
             "VERIFY_REQUIRED",
-            "Urgent financial requests that ask you to share are often scams.",
-            "⚠️ Pattern: Urgent financial scam",
+            "The system found some suspicious or uncertain signals. This content should be checked against reliable sources before sharing.",
+            None,
         )
 
-    if prob_pos >= 0.60:
-        return ("LIKELY_MISINFORMATION", "The pattern of this content strongly suggests it's false.", None)
-    if prob_pos >= 0.30:
-        return ("VERIFY_REQUIRED", "This content shows some suspicious patterns — better to check before sharing.", None)
-    return ("SAFE_TO_SHARE", "This content appears to be legitimate based on our analysis.", None)
+    if any(x in lowered for x in ["breaking", "urgent", "share this"]):
+        return (
+            "VERIFY_REQUIRED",
+            "Although the model score is low, the wording still suggests caution. Verify before sharing.",
+            "Low model risk but cautionary wording present.",
+        )
+
+    return (
+        "SAFE_TO_SHARE",
+        "The content does not show strong misinformation signals in the model analysis.",
+        None,
+    )
 
 
 def calculate_tactics_score(triggers: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -224,7 +230,25 @@ def calculate_tactics_score(triggers: List[Dict[str, Any]]) -> Dict[str, Any]:
     trigger_consistency = 1.0 - (mx - mn)
     intensity = min(1.0, (len(triggers) / 5.0) * trigger_consistency)
 
-    return {"score": float(avg_score), "band": band, "intensity": float(intensity), "triggers": triggers[:5]}
+    return {
+        "score": float(avg_score),
+        "band": band,
+        "intensity": float(intensity),
+        "triggers": triggers[:5],
+    }
+
+
+def _guidance_from_band_and_verdict(band: str, action_verdict: str) -> str:
+    b = str(band or "MEDIUM").upper()
+    verdict = str(action_verdict or "").upper()
+
+    if b == "HIGH" or verdict in {"LIKELY_MISINFORMATION", "DO_NOT_SHARE"}:
+        return "High-risk signal. Do not share until the claim has been checked against trusted primary sources."
+
+    if b == "MEDIUM" or verdict == "VERIFY_REQUIRED":
+        return "Medium-risk signal. Verify key claims using trusted sources before sharing."
+
+    return "Low-risk signal. Sharing risk appears lower, but still verify if the claim is high-impact or time-sensitive."
 
 
 def generate_user_friendly_explanation(
@@ -243,10 +267,6 @@ def generate_user_friendly_explanation(
     tactics_band: str = "LOW",
     key_phrases: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
-    """
-    Generate user-friendly explanation - now uses the detailed explanation from explanations.py
-    """
-    # Use the detailed explanation generator
     detailed_exp = generate_explanation(
         text=text,
         verdict=action_verdict,
@@ -258,9 +278,9 @@ def generate_user_friendly_explanation(
         guidance=guidance,
         stance=stance,
         triggers=triggers,
-        key_phrases=key_phrases,
+        key_phrases=key_phrases or [],
     )
-    
+
     return {
         "user_summary": detailed_exp.get("user_summary", ""),
         "user_reasons": detailed_exp.get("user_reasons", []),
@@ -271,9 +291,44 @@ def generate_user_friendly_explanation(
     }
 
 
-# ============================================================================
-# Main pipeline function (called by FastAPI route)
-# ============================================================================
+def _apply_internet_adjustment(
+    ensemble_prob: float,
+    internet_verification: Optional[Dict[str, Any]],
+) -> float:
+    """
+    Smoothly adjust the raw ensemble probability using internet verification.
+
+    This avoids hard-coded-feeling outputs such as many cases always becoming
+    8% or 18%. Instead, the final score moves gradually based on:
+    - the raw model probability
+    - the verification verdict
+    - the verification confidence
+    """
+    if not internet_verification or not internet_verification.get("performed"):
+        return ensemble_prob
+
+    overall = internet_verification.get("overall_verdict", "UNVERIFIED")
+    conf = float(internet_verification.get("overall_confidence", 0.0))
+    adjusted = float(ensemble_prob)
+
+    if overall == "LIKELY_TRUE":
+        adjusted = ensemble_prob * (1.0 - 0.70 * conf)
+
+    elif overall == "LEANING_TRUE":
+        adjusted = ensemble_prob * (1.0 - 0.35 * conf)
+
+    elif overall == "LIKELY_FALSE":
+        adjusted = ensemble_prob + (1.0 - ensemble_prob) * (0.70 * conf)
+
+    elif overall == "LEANING_FALSE":
+        adjusted = ensemble_prob + (1.0 - ensemble_prob) * (0.35 * conf)
+
+    elif overall == "MIXED":
+        adjusted = 0.7 * ensemble_prob + 0.3 * 0.25
+
+    return float(max(0.01, min(0.99, adjusted)))
+
+
 def run_predict_auto(
     *,
     text: str,
@@ -284,20 +339,15 @@ def run_predict_auto(
     enhanced_early_model: Optional[Any],
     legacy_early_model: Optional[Any],
     bert_classifier: Optional[Any],
+    enable_internet: bool = True,
 ) -> Dict[str, Any]:
-    """
-    Returns a dict matching AutoPredictResponse schema.
-    Raises exceptions to be handled by main.py route.
-    """
     text = norm_text(text)
     if not text:
         raise ValueError("Missing or empty 'text'")
 
-    # Unified model
     u = predict_probs_unified(unified_model, text)
     prob_unified = float(u["prob_pos"])
 
-    # Health model (optional)
     prob_health = None
     if health_model is not None:
         try:
@@ -306,7 +356,6 @@ def run_predict_auto(
         except Exception as e:
             print(f"⚠️ Health model failed: {e}")
 
-    # Early enhanced model (optional)
     prob_enhanced = None
     early_dict = None
     if enhanced_early_model is not None:
@@ -316,7 +365,6 @@ def run_predict_auto(
         except Exception as e:
             print(f"⚠️ Early model failed: {e}")
 
-    # Legacy early model (optional)
     prob_legacy = None
     if legacy_early_model is not None:
         try:
@@ -325,7 +373,6 @@ def run_predict_auto(
         except Exception as e:
             print(f"⚠️ Legacy model failed: {e}")
 
-    # Stance + (optional) “bert_classifier” block (your current system)
     stance_data = detect_stance(text)
     stance = stance_data["stance"]
 
@@ -333,7 +380,7 @@ def run_predict_auto(
     key_phrases: List[Dict[str, Any]] = []
     if bert_classifier is not None:
         try:
-            br = bert_classifier.classify(text)  # your existing interface
+            br = bert_classifier.classify(text)
             bert_risk = float(br.get("risk_score", 0.5))
             stance = br.get("stance", stance)
             key_phrases = br.get("key_phrases", []) or []
@@ -341,31 +388,69 @@ def run_predict_auto(
             print(f"⚠️ bert_classifier failed: {e}")
             bert_risk = None
 
-    # Ensemble
     ens = ensemble_prediction(
         unified_prob=prob_unified,
         enhanced_prob=prob_enhanced,
         legacy_prob=prob_legacy,
         bert_prob=bert_risk,
     )
-    ensemble_prob = float(ens["ensemble_probability"])
-    confidence = max(ensemble_prob, 1.0 - ensemble_prob)
+    ensemble_prob_raw = float(ens["ensemble_probability"])
 
-    # If no bert_classifier, adjust risk by stance (your existing design)
     if bert_classifier is None:
-        ensemble_prob = float(adjust_risk_by_stance(ensemble_prob, stance_data))
+        ensemble_prob_raw = float(adjust_risk_by_stance(ensemble_prob_raw, stance_data))
 
-    # Backward-compatible risk band
+    internet_verification = {
+        "enabled": bool(enable_internet),
+        "performed": False,
+        "overall_verdict": "UNVERIFIED",
+        "overall_confidence": 0.0,
+        "claims": [],
+        "sources": [],
+        "summary_note": "Internet verification disabled.",
+        "error": None,
+    }
+
+    if enable_internet:
+        try:
+            internet_verification = verify_text_on_web(text)
+        except Exception as e:
+            print(f"⚠️ Internet verification failed: {e}")
+            internet_verification = {
+                "enabled": True,
+                "performed": False,
+                "overall_verdict": "UNVERIFIED",
+                "overall_confidence": 0.0,
+                "claims": [],
+                "sources": [],
+                "summary_note": "Internet verification failed.",
+                "error": str(e),
+            }
+
+    ensemble_prob = _apply_internet_adjustment(ensemble_prob_raw, internet_verification)
+
+    confidence = compute_model_confidence(
+        ensemble_prob=ensemble_prob,
+        model_probs=[
+            prob_unified,
+            prob_health,
+            prob_enhanced,
+            prob_legacy,
+            bert_risk,
+        ],
+        internet_verification=internet_verification,
+    )
+
     band = risk_band(ensemble_prob)
 
-    # Action verdict
-    action_verdict, action_reason, override_note = determine_action_verdict(ensemble_prob, text)
+    action_verdict, action_reason, override_note = determine_action_verdict(
+        ensemble_prob,
+        text,
+        internet_verification,
+    )
 
-    # Triggers
     raw_triggers = build_trigger_breakdown(text, stance=stance)
     triggers = raw_triggers[:5]
 
-    # Early block (schema EarlyBlock)
     early_block = None
     if early_dict is not None:
         early_block = {
@@ -375,11 +460,9 @@ def run_predict_auto(
             "virality_score": float(early_dict.get("virality_score", 0.0)),
         }
 
-    # “Two score” split (schema)
     misinformation_band = "HIGH" if ensemble_prob >= 0.45 else ("MEDIUM" if ensemble_prob >= 0.15 else "LOW")
     tactics_data = calculate_tactics_score(triggers)
-
-    guidance = control_action(band)
+    guidance = _guidance_from_band_and_verdict(band, action_verdict) or control_action(band)
 
     signals = {
         "endpoint": endpoint,
@@ -388,13 +471,17 @@ def run_predict_auto(
         "prob_enhanced": prob_enhanced,
         "prob_legacy": prob_legacy,
         "bert_risk": bert_risk,
-        "ensemble_prob": ensemble_prob,
+        "ensemble_prob_raw": ensemble_prob_raw,
+        "ensemble_prob_final": ensemble_prob,
         "confidence": confidence,
         "risk_band": band,
         "stance": stance,
         "misinformation_band": misinformation_band,
         "tactics_band": tactics_data["band"],
         "tactics_intensity": tactics_data["intensity"],
+        "internet_enabled": enable_internet,
+        "internet_overall_verdict": internet_verification.get("overall_verdict"),
+        "internet_overall_confidence": internet_verification.get("overall_confidence"),
     }
 
     exp = generate_user_friendly_explanation(
@@ -414,7 +501,11 @@ def run_predict_auto(
         key_phrases=key_phrases,
     )
 
-    # Analyst block (LLM preferred, rule-based fallback)
+    if internet_verification.get("enabled"):
+        web_note = internet_verification.get("summary_note", "")
+        if web_note:
+            exp["user_reasons"] = list(exp.get("user_reasons", [])) + [f"Internet verification: {web_note}"]
+
     try:
         analyst_data = generate_analyst(
             text=text,
@@ -430,22 +521,31 @@ def run_predict_auto(
             "propagation_dynamics": build_propagation_dynamics(band, stance),
             "human_susceptibility_logic": build_susceptibility_logic(text, stance),
             "algorithmic_advantage": build_algorithmic_advantage(text, stance),
-            "note": "Analysis based on linguistic patterns and stance cues.",
+            "note": "Analysis based on linguistic patterns, stance cues, and optional web evidence.",
         }
 
     model_breakdown = {
         "unified": prob_unified,
+        "health": prob_health,
         "enhanced": prob_enhanced,
         "legacy": prob_legacy,
+        "bert": bert_risk,
         "ensemble": ensemble_prob,
     }
+
+    misinformation_explanation = f"Stance: {stance}."
+    if internet_verification.get("performed"):
+        misinformation_explanation += (
+            f" Internet verdict: {internet_verification.get('overall_verdict', 'UNVERIFIED')} "
+            f"({float(internet_verification.get('overall_confidence', 0.0)):.0%} confidence)."
+        )
 
     misinformation_score = {
         "band": misinformation_band,
         "probability": float(ensemble_prob),
-        "raw_probability": float(ensemble_prob),
-        "explanation": f"Stance: {stance}.",
-        "stance": stance,  # must match schema: debunking/warning/neutral/spreading
+        "raw_probability": float(ensemble_prob_raw),
+        "explanation": misinformation_explanation,
+        "stance": stance,
     }
 
     tactics_score = {
@@ -458,7 +558,7 @@ def run_predict_auto(
         ),
     }
 
-    resp = {
+    return {
         "request_id": request_id,
         "misinformation": misinformation_score,
         "manipulation_tactics": tactics_score,
@@ -479,9 +579,8 @@ def run_predict_auto(
             "algorithmic_advantage": analyst_data.get("algorithmic_advantage", ""),
             "note": analyst_data.get("note", ""),
         },
+        "internet_verification": internet_verification,
         "input_type": "text",
         "extracted_text": None,
         "filename": None,
     }
-
-    return resp

@@ -208,7 +208,7 @@ def prepare_twitter_dataset(name: str) -> List[Dict]:
             edges = parse_tree_edges(tree_file, event_id)
             features = compute_diffusion_features(edges, event_id)
 
-            # ✅ FIXED MAPPING:
+            
             # true -> 0 (non-misinfo)
             # false/unverified/non-rumor/unknown -> 1 (misinfo)
             binary_label = 0 if label == "true" else 1

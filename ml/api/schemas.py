@@ -10,6 +10,10 @@ class ApiBaseModel(BaseModel):
 
 class PredictRequest(ApiBaseModel):
     text: str = Field(..., description="Input text to analyse")
+    enable_internet: bool = Field(
+        default=True,
+        description="Enable live internet verification against trusted sources",
+    )
 
 
 class EarlyBlock(ApiBaseModel):
@@ -25,6 +29,7 @@ class ExplanationBlock(ApiBaseModel):
     user_guidance: str = "Verify before sharing."
     final_explanation: str = "Analysis completed successfully."
     signals: Dict[str, Any] = {}
+    key_phrases: List[Dict[str, Any]] = []
 
 
 class AnalystTrigger(ApiBaseModel):
@@ -50,51 +55,83 @@ class ModelBreakdown(ApiBaseModel):
 
 
 class MisinformationScore(ApiBaseModel):
-    """Score for actual truthfulness/misinformation likelihood"""
     band: Literal["LOW", "MEDIUM", "HIGH"]
-    probability: float  # 0-1 scale, final adjusted probability
-    raw_probability: Optional[float] = None  # Raw model probability before adjustment
+    probability: float
+    raw_probability: Optional[float] = None
     explanation: str
     stance: Literal["debunking", "warning", "neutral", "spreading"]
 
 
 class TacticsScore(ApiBaseModel):
-    """Score for psychological manipulation tactics"""
     band: Literal["LOW", "MEDIUM", "HIGH"]
-    intensity: float  # 0-1 scale
+    intensity: float
     detected_triggers: List[Dict[str, Any]] = []
     overall_assessment: str = ""
 
 
+class InternetSource(ApiBaseModel):
+    title: str = ""
+    url: str = ""
+    snippet: str = ""
+    domain: str = ""
+    source_type: str = "general"
+    credibility: float = 0.0
+    evidence_direction: str = "mentions"
+
+
+class InternetClaimResult(ApiBaseModel):
+    claim: str
+    verdict: Literal[
+        "LIKELY_TRUE",
+        "LEANING_TRUE",
+        "LIKELY_FALSE",
+        "LEANING_FALSE",
+        "MIXED",
+        "UNVERIFIED",
+    ]
+    confidence: float
+    support_score: float = 0.0
+    refute_score: float = 0.0
+    mixed_score: float = 0.0
+    sources: List[InternetSource] = []
+
+
+class InternetVerification(ApiBaseModel):
+    enabled: bool = True
+    performed: bool = False
+    overall_verdict: Literal["LIKELY_TRUE", "LIKELY_FALSE", "MIXED", "UNVERIFIED"] = "UNVERIFIED"
+    overall_confidence: float = 0.0
+    claims: List[InternetClaimResult] = []
+    sources: List[InternetSource] = []
+    summary_note: str = ""
+    error: Optional[str] = None
+
+
 class AutoPredictResponse(ApiBaseModel):
     request_id: str
-    
-    # Split into two scores
+
     misinformation: MisinformationScore
     manipulation_tactics: TacticsScore
-    
-    # Keep original fields for backward compatibility
+
     action_verdict: Literal["SAFE_TO_SHARE", "VERIFY_REQUIRED", "LIKELY_MISINFORMATION"]
     action_reason: str
     override_note: Optional[str] = None
-    
-    # Confidence metrics
-    confidence: float  # Overall confidence (max of two scores)
-    risk_band: Literal["LOW", "MEDIUM", "HIGH"]  # For backward compatibility
-    misinfo_probability: float  # Original p (ensemble)
-    
-    # Model breakdown
+
+    confidence: float
+    risk_band: Literal["LOW", "MEDIUM", "HIGH"]
+    misinfo_probability: float
+
     model_breakdown: ModelBreakdown
-    
-    # Triggers
+
     triggers: List[AnalystTrigger] = []
-    
-    # Optional blocks
+
     early: Optional[EarlyBlock] = None
     explanation: ExplanationBlock
     analyst: Optional[AnalystBlock] = None
-    
-    # Input metadata
+
+    internet_verification: Optional[InternetVerification] = None
+
     input_type: str = "text"
     extracted_text: Optional[str] = None
     filename: Optional[str] = None
+    latency_ms: Optional[float] = None
