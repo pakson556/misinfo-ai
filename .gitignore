@@ -3,19 +3,22 @@
 venv/
 __pycache__/
 *.pyc
+.pytest_cache/
+.ruff_cache/
 
 # Node
 node_modules/
+dist/
 
-# macOS
+# Secrets and local data
+.env
+backend/data/
+training/data/
+training/raw/
+
+# Trained models (large; publish to Hugging Face instead)
+backend/models/style/
+backend/models/style_work/
+
 .DS_Store
-
-# Logs
 *.log
-
-# Datasets (do not upload)
-ml/data/raw/
-ml/data/processed/
-
-# Trained model files — hosted on Hugging Face (pakson/misinfo-ai-models)
-ml/data/models/*.joblib

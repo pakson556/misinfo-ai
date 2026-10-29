@@ -1,62 +1,128 @@
 # MisInfo AI
 
-An AI-powered misinformation detection platform built as a final year dissertation project. It analyses text and image-based content using an ensemble of machine learning models, BERT-based classification, and real-time internet verification.
+Paste a post, a link or a screenshot. MisInfo AI pulls out each factual claim,
+looks for evidence from fact-checkers and reliable sources, and shows you, right
+on the text, which parts are true, false, or missing context, with every source linked.
 
-> **Final Year Dissertation**
-> Supervised by **Galvin Kaiyamo**
+![MisInfo AI result view](docs/screenshot.png)
+<sub>UI preview with example data.</sub>
 
-## Features
+> Version 2 is a rebuild of my final-year dissertation project (supervised by
+> **Galvin Kaiyamo**, University of East London). The original is on `main`;
+> [docs/V1_AUDIT.md](docs/V1_AUDIT.md) explains what was wrong with it and why v2 works differently.
 
-- **Text & Image Analysis** — paste text or upload a screenshot; the system runs OCR and scores content across three models
-- **Ensemble Detection** — combines a rule-based classifier, BERT/transformer model, and a prediction service for higher accuracy
-- **Internet Verification** — cross-references claims against the Google Fact Check Tools API and trusted fact-checking sources (Snopes, PolitiFact, FullFact, etc.)
-- **Live Misinformation Feed** — real-time Google News RSS stream filtered for misinformation and debunking coverage
-- **Explainability** — per-prediction explanations showing which signals drove the verdict
-- **Dashboard & Global Monitor** — visualise trends, risk scores, and detection metrics over time
+## How it works
 
-## Tech Stack
-
-| Layer | Technology |
-|---|---|
-| Frontend | React, Tailwind CSS, Lucide Icons |
-| ML API | Python, FastAPI |
-| Classification | BERT / DistilBERT (HuggingFace Transformers), rule-based fallback |
-| Fact-checking | Google Fact Check Tools API |
-| OCR | Tesseract / OCR service |
-
-## Getting Started
-
-### ML API
-
-```bash
-cd ml
-pip install -r ../requirements.txt
-
-# Download trained models from Hugging Face (one-time setup)
-python download_models.py
-
-uvicorn api.main:app --reload
+```mermaid
+flowchart LR
+    A[Text / link / screenshot] --> B[Ingest<br/>article extraction, OCR]
+    B --> C[Extract checkable claims]
+    B --> T[Persuasion tactics<br/>+ optional style model]
+    C --> D{{For each claim, in parallel}}
+    D --> E[Evidence<br/>Google Fact Check, Wikipedia,<br/>Brave / Tavily, Claude web search]
+    E --> F[Verify claim against evidence<br/>verdict + reasoning + cited sources]
+    F --> G[Aggregate]
+    T --> G
+    G --> H[Verdict, summary, guidance]
+    H -.streamed live.-> UI[Annotated text in the browser]
 ```
 
-### Frontend
+**Evidence decides the verdict.** A claim is only marked false when reliable
+evidence contradicts it. Writing style and persuasion tactics (urgency, conspiracy
+framing, pressure to share…) are shown and highlighted, but they can only nudge
+the risk score where evidence is missing, and confidence reflects how much of the
+content is actually backed by evidence. With no AI model configured, the app falls
+back to matching published fact-checks and says "unverified" rather than guessing.
+
+Everything streams: you see claims appear, then turn red, amber or green one by one.
+
+## Quick start (Docker)
 
 ```bash
+cp backend/.env.example backend/.env    # add keys (all optional)
+docker compose up --build
+```
+
+Open http://localhost:8080.
+
+## Local development
+
+```bash
+# Backend (Python 3.11+)
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements-dev.txt -r requirements-ml.txt
+cp .env.example .env
+uvicorn app.main:app --reload            # http://localhost:8000/api/docs
+
+# Frontend (Node 20+), in another terminal
 cd frontend
 npm install
-npm run dev
+npm run dev                               # http://localhost:5173 (proxies /api to :8000)
 ```
 
-## Project Structure
+Screenshot reading needs [Tesseract](https://tesseract-ocr.github.io/tessdoc/Installation.html)
+(`brew install tesseract` / `apt install tesseract-ocr`). It's included in the Docker image.
+
+## Configuration
+
+All settings are environment variables (see [`backend/.env.example`](backend/.env.example)).
+
+| Setting | What it does |
+|---|---|
+| `LLM_PROVIDER` | `anthropic` (best: cited reasoning + its own web search), `ollama` (free, local, no web search) or `none` |
+| `ANTHROPIC_API_KEY`, `LLM_MODEL`, `LLM_FAST_MODEL` | Claude models for verification and for claim extraction/summaries |
+| `GOOGLE_FACTCHECK_API_KEY` | Free key; searches published fact-checks worldwide. Strongly recommended |
+| `BRAVE_API_KEY` / `TAVILY_API_KEY` | Optional general web search |
+| `STORE_INPUT_TEXT` | `false` keeps verdicts in history but not the pasted text |
+| `DATABASE_URL` | Defaults to SQLite; any SQLAlchemy URL (e.g. Postgres) works |
+
+## API
+
+Interactive docs at `/api/docs`.
+
+| Method | Path | |
+|---|---|---|
+| `POST` | `/api/analyze/stream` | `{"text": "..."}` or `{"url": "..."}`; Server-Sent Events: `input`, `stage`, `claims`, `tactics`, `style`, `claim_result`, `result` |
+| `POST` | `/api/analyze/image/stream` | multipart `file`; same events |
+| `POST` | `/api/analyze` | same input, returns the final result as JSON |
+| `GET` | `/api/history`, `/api/history/{id}` | past checks; `DELETE` removes one |
+| `GET` | `/api/stats` | aggregates for the Insights page |
+| `GET` | `/api/health` | which model and sources are active |
+
+## Project layout
 
 ```
-misinfodetec/
-├── frontend/          # React app
-│   └── src/
-│       ├── components/   # ResultCard, RiskActions, InternetVerificationPanel, ...
-│       ├── pages/        # DetectionLab, GlobalMonitor, Dashboard
-│       └── services/     # API client
-└── ml/
-    ├── api/              # FastAPI app — main.py, predict_service, bert_classifier, ...
-    ├── training/         # Data prep and model training scripts
-    └── data/             # Logs and model artefacts
+backend/
+  app/
+    pipeline/    ingest, claims → retrieval → verify, tactics, style, aggregate, orchestrator
+    llm/         provider interface + Claude, Ollama and no-LLM implementations
+    services/    HTTP client with caching, source credibility
+    main.py      FastAPI routes, streaming, rate limiting
+  tests/         21 tests, no network or keys needed
+frontend/
+  src/           React app: annotated text view, history, insights
+training/        leak-free data prep, TF-IDF baseline, transformer fine-tuning → ONNX
+docs/            v1 audit
+```
+
+## Training the optional style model
+
+See [training/README.md](training/README.md). The pipeline fixes v1's label and
+leakage problems and reports leave-one-dataset-out results, the honest measure of
+how well a model handles sources it hasn't seen.
+
+## Limits
+
+Automated fact-checking can be wrong: evidence may be missing for new or local
+claims, and models can misread sources. The app shows its sources and its
+confidence so people can check for themselves. It's a tool to support judgement,
+not replace it.
+
+## Tests
+
+```bash
+cd backend && pytest -q
+cd training && pytest -q tests
+cd frontend && npx eslint src && npm run build
 ```

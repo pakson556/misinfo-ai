@@ -1,0 +1,33 @@
+# docker compose up --build   ->  open http://localhost:8080
+services:
+  backend:
+    build: ./backend
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      CORS_ORIGINS: http://localhost:8080
+    volumes:
+      - misinfo-data:/app/data
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Optional local LLM: `docker compose --profile ollama up`, then set LLM_PROVIDER=ollama
+  # and OLLAMA_BASE_URL=http://ollama:11434 in backend/.env
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  misinfo-data:
+  ollama-models:

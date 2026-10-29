@@ -3,23 +3,102 @@
 @tailwind utilities;
 
 @layer base {
-  html, body {
-    height: 100%;
-    @apply bg-white;
+  html {
+    font-family: "Instrument Sans Variable", system-ui, sans-serif;
+    color: #18202e;
+    background: #f7f8fa;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
-  
-  body {
-    margin: 0;
-    color: #1e293b;
+  :focus-visible {
+    outline: 2px solid #2f4bd8;
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+  ::selection {
+    background: #e9edfc;
   }
 }
 
 @layer components {
-  .card {
-    @apply bg-white border border-gray-200 rounded-xl shadow-sm hover:shadow-md transition-shadow;
+  /* Claim highlights in the annotated document. Each verdict sets its own
+     colours; the active state deepens them so it flows across segments. */
+  .claim-mark {
+    --wash: #eef0f3;
+    --strong: #dfe3e9;
+    --line: #98a1b3;
+    color: inherit;
+    cursor: pointer;
+    padding: 0.08em 0;
+    background: var(--wash);
+    box-shadow: inset 0 -2px 0 var(--line);
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    transition: background-color 400ms ease, box-shadow 150ms ease;
   }
-  
-  .input-focus {
-    @apply focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:outline-none;
+  .mark-refuted { --wash: #fbeaeb; --strong: #f4c9cc; --line: #b4232c; }
+  .mark-mixed { --wash: #fbf1df; --strong: #f3dcae; --line: #a86a12; }
+  .mark-supported { --wash: #e4f3ec; --strong: #bfe3d1; --line: #1d7352; }
+  .mark-unverified { --wash: #eef0f3; --strong: #d9dde4; --line: #98a1b3; }
+  .mark-pending {
+    --line: transparent;
+    background: linear-gradient(90deg, #eef0f3 0%, #e2e5ea 50%, #eef0f3 100%);
+    background-size: 200% 100%;
+    animation: sweep 1.6s linear infinite;
+  }
+  .claim-mark.is-active,
+  .claim-mark:hover {
+    background: var(--strong);
+    box-shadow: inset 0 -3px 0 var(--line);
+  }
+  /* Persuasion tactics: dotted underline, independent of claim colour */
+  .tactic {
+    text-decoration: underline dotted #a86a12;
+    text-decoration-thickness: 2px;
+    text-underline-offset: 0.28em;
+  }
+
+  .shimmer {
+    background: linear-gradient(90deg, #8a93a6 0%, #c9ced8 50%, #8a93a6 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: sweep 1.8s linear infinite;
+  }
+  .shimmer-block {
+    background: linear-gradient(90deg, #eceef2 0%, #e1e4ea 50%, #eceef2 100%);
+    background-size: 200% 100%;
+    animation: sweep 1.6s linear infinite;
+  }
+  /* The one orchestrated moment: the verdict arriving */
+  .verdict-reveal {
+    animation: reveal 520ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+}
+
+@keyframes sweep {
+  to {
+    background-position: -200% 0;
+  }
+}
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }

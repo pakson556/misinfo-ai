@@ -1,0 +1,15 @@
+# Data prep + baseline (CPU)
+pandas>=2.2
+pyarrow>=16
+numpy>=1.26
+scikit-learn>=1.6
+joblib>=1.4
+# Transformer fine-tuning (GPU recommended, e.g. Colab)
+torch>=2.3
+transformers>=4.46
+datasets>=3.0
+accelerate>=1.0
+sentencepiece>=0.2
+tiktoken>=0.7
+onnx>=1.16
+pytest>=8

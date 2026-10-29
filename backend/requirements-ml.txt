@@ -1,0 +1,6 @@
+# Optional: needed only to serve a trained style model
+onnxruntime>=1.18
+tokenizers>=0.19
+numpy>=1.26
+scikit-learn>=1.5
+joblib>=1.4
