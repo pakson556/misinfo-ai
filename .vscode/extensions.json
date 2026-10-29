@@ -1,0 +1,15 @@
+{
+  // VS Code shows "Install recommended extensions" when you open this folder.
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "ms-python.debugpy",
+    "charliermarsh.ruff",
+    "dbaeumer.vscode-eslint",
+    "bradlc.vscode-tailwindcss",
+    "ms-azuretools.vscode-docker",
+    "mikestead.dotenv",
+    "github.vscode-github-actions",
+    "eamodio.gitlens"
+  ]
+}
