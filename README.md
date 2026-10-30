@@ -103,7 +103,7 @@ backend/
 frontend/
   src/           React app: annotated text view, history, insights
 training/        leak-free data prep, TF-IDF baseline, transformer fine-tuning → ONNX
-docs/            v1 audit
+docs/            v1 audit + MisInfo-AI-Guide.pdf (full beginner guide)
 ```
 
 ## Training the optional style model
