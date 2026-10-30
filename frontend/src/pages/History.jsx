@@ -1,3 +1,7 @@
+/*
+ * /history: every past check, newest first, with its verdict colour and preview.
+ * Click one to reopen it; the bin icon deletes it.
+ */
 import { FileText, ImageIcon, Link2, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";

@@ -1,3 +1,7 @@
+/*
+ * /insights: totals across all checks: checks per day (bar chart, using the
+ * Recharts library), verdict breakdowns, and the most common persuasion tactics.
+ */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";

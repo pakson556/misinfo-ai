@@ -1,3 +1,8 @@
+/*
+ * The list of checked claims on the right: one "note" per claim, with its
+ * verdict, the AI's reasoning, and its sources (fact-checks first).
+ * Hovering or clicking a note highlights the matching words in the text, and vice versa.
+ */
 import { ExternalLink } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { CLAIM, SOURCE_KIND, STANCE, pct } from "../lib/verdicts.js";

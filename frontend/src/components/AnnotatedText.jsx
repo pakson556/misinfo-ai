@@ -1,3 +1,16 @@
+/*
+ * The left-hand panel of a result: your text, with claims highlighted by verdict
+ * colour and persuasion tactics underlined with dotted lines.
+ *
+ * The tricky part is overlap: a tactic can sit inside a claim, or across two.
+ * So we cut the text at every start/end position of every claim and tactic,
+ * giving small "segments", then style each segment by whatever covers it.
+ *
+ *   text:     "BREAKING!!! Doctors say lemon water kills cancer."
+ *   claim:                 [--------------------------------]
+ *   tactics:  [------][--]
+ *   segments: [BREAKING][!!!][ ][Doctors say lemon water kills cancer][.]
+ */
 import { useMemo } from "react";
 import { CLAIM } from "../lib/verdicts.js";
 

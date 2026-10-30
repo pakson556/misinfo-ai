@@ -1,3 +1,7 @@
+// Tailwind CSS = styling with small utility classes in the JSX
+// (e.g. className="text-sm text-ink"). This file defines the project's design
+// tokens: the colour palette and fonts. "ink" is the text colour, "paper" the
+// background, and refuted / mixed / supported / unverified are the verdict colours.
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./src/**/*.{js,jsx}"],

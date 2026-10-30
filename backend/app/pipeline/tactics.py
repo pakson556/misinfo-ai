@@ -1,13 +1,26 @@
-"""Manipulation-tactic detection.
+"""
+Persuasion-tactic detection: the "How it's written" panel and the dotted underlines.
 
-Tactics describe *how* a text tries to persuade, not whether it is true. True
-content can use urgent language and false content can be calm, so tactics only
-nudge the overall risk; claim evidence decides it.
+WHAT IT DOES
+    Scans the text for phrases that pressure people ("share before they delete
+    it!"), stir up emotion ("SHOCKING"), or lean on fake authority ("a nurse
+    told me"). Each match is recorded with its exact position so the website
+    can underline it.
 
-Categories follow the manipulation techniques used in inoculation research
-(Roozenbeek & van der Linden, e.g. the "Bad News" / "Go Viral!" games) plus
-common social-media signals. Every pattern uses word boundaries so "ai" does not
-match "said" and "pass" does not match "passed".
+WHY IT DOESN'T DECIDE THE VERDICT
+    Tactics describe *how* a text tries to persuade, not whether it is true.
+    True content can use urgent language and false content can be calm, so
+    tactics only nudge the risk score when evidence is missing (see aggregate.py).
+
+WHERE THE CATEGORIES COME FROM
+    The manipulation techniques used in "inoculation" research (Roozenbeek &
+    van der Linden, e.g. the "Bad News" and "Go Viral!" games), plus common
+    social-media signals.
+
+PURE PYTHON, NO AI
+    This runs locally in milliseconds with regular expressions (regex), so it
+    works even with no API keys. Every pattern uses word boundaries (\\b), so
+    "ai" does not match "said" and "pass" does not match "passed" (a v1 bug).
 """
 
 from __future__ import annotations
@@ -20,15 +33,24 @@ from ..schemas import Span, Tactic
 
 @dataclass(frozen=True)
 class TacticDef:
-    id: str
-    name: str
-    description: str
-    weight: float
-    patterns: tuple[str, ...]
+    """The definition of one tactic. To add a new tactic, add a TacticDef to TACTICS below."""
+
+    id: str  # internal name, stored in the database
+    name: str  # shown in the UI
+    description: str  # shown under the name
+    weight: float  # 0..1, how strong a signal this tactic is (conspiracy framing > absolutes)
+    patterns: tuple[str, ...]  # regular expressions to search for
 
 
 def _w(*words: str) -> tuple[str, ...]:
-    """Whole-word/phrase patterns, tolerant of curly apostrophes and extra spaces."""
+    """
+    Turn plain phrases into safe whole-word regex patterns.
+
+    "don't wait" becomes \\bdon['’]t\\s+wait\\b, which:
+      - only matches whole words (\\b = word boundary),
+      - accepts straight ' and curly ’ apostrophes (phones type curly ones),
+      - accepts any amount of whitespace between words.
+    """
     out = []
     for w in words:
         p = re.escape(w).replace("\\ ", r"\s+").replace("'", "['’]")
@@ -36,6 +58,7 @@ def _w(*words: str) -> tuple[str, ...]:
     return tuple(out)
 
 
+# The full list of tactics. Matching ignores upper/lower case.
 TACTICS: tuple[TacticDef, ...] = (
     TacticDef(
         "virality_call",
@@ -258,14 +281,29 @@ TACTICS: tuple[TacticDef, ...] = (
     ),
 )
 
-_CAPS_WORD = re.compile(r"\b[A-Z]{4,}\b")
-_MULTI_PUNCT = re.compile(r"[!?]{2,}")
+# Two tactics are detected by shape rather than by phrase:
+_CAPS_WORD = re.compile(r"\b[A-Z]{4,}\b")  # a word of 4+ capital letters ("BREAKING")
+_MULTI_PUNCT = re.compile(r"[!?]{2,}")  # "!!!" or "?!?"
+# Capitalised words that are normal acronyms, not shouting.
 _ACRONYM_OK = {"NASA", "COVID", "NATO", "FIFA", "UEFA", "NHS", "HTTP", "HTTPS", "UNICEF", "WHO", "USA", "OPEC", "NIH"}
 
+# Compile every pattern once when the server starts (compiling on every request would be slow).
 _COMPILED = [(t, [re.compile(p, re.IGNORECASE) for p in t.patterns]) for t in TACTICS]
+
+# id -> display name, including the two shape-based tactics. Used by the Insights page (db.py).
+TACTIC_NAMES = {t.id: t.name for t in TACTICS} | {
+    "shouting": "Shouting (ALL CAPS)",
+    "excess_punctuation": "Excessive punctuation",
+}
 
 
 def _merge_spans(spans: list[Span]) -> list[Span]:
+    """
+    Combine overlapping matches into one highlight.
+
+    E.g. "share this" and "share this before they delete" both match the same
+    words; we want one underline, not two stacked on top of each other.
+    """
     spans = sorted(spans, key=lambda s: (s.start, -s.end))
     out: list[Span] = []
     for s in spans:
@@ -279,10 +317,17 @@ def _merge_spans(spans: list[Span]) -> list[Span]:
 
 
 def detect_tactics(text: str) -> tuple[list[Tactic], float]:
-    """Return detected tactics with highlighted spans and a 0..1 intensity score."""
+    """
+    Find every tactic in `text`.
+
+    Returns (tactics, score):
+      tactics  list of Tactic, strongest first, each with the exact places it appears
+      score    0..1 overall "how hard is this pushing" number
+    """
     found: list[Tactic] = []
     words = max(1, len(text.split()))
 
+    # 1) Phrase-based tactics
     for t, regexes in _COMPILED:
         spans = [Span(start=m.start(), end=m.end(), text=m.group(0)) for rx in regexes for m in rx.finditer(text)]
         if not spans:
@@ -293,6 +338,7 @@ def detect_tactics(text: str) -> tuple[list[Tactic], float]:
         severity = min(1.0, t.weight * (0.6 + 0.4 * min(1.0, density / 2)))
         found.append(Tactic(id=t.id, name=t.name, description=t.description, severity=round(severity, 3), spans=spans[:12]))
 
+    # 2) Shouting: several ALL-CAPS words, or a text that is mostly capitals
     caps = [m for m in _CAPS_WORD.finditer(text) if m.group(0) not in _ACRONYM_OK]
     letters = sum(c.isalpha() for c in text) or 1
     caps_ratio = sum(c.isupper() for c in text) / letters
@@ -307,6 +353,7 @@ def detect_tactics(text: str) -> tuple[list[Tactic], float]:
             )
         )
 
+    # 3) Excessive punctuation
     punct = list(_MULTI_PUNCT.finditer(text))
     if punct:
         found.append(
@@ -320,7 +367,9 @@ def detect_tactics(text: str) -> tuple[list[Tactic], float]:
         )
 
     found.sort(key=lambda t: t.severity, reverse=True)
-    # Noisy-OR: several independent weak signals add up, but never exceed 1.
+    # Combine into one score with "noisy-OR": several weak signals add up, but the
+    # total can never go above 1. E.g. two tactics of severity 0.5 give
+    # 1 - (1-0.35)*(1-0.35) = 0.58, not 1.0.
     score = 1.0
     for t in found:
         score *= 1 - t.severity * 0.7

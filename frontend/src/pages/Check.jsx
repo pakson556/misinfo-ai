@@ -1,3 +1,7 @@
+/*
+ * The home page (/). Before a check: headline, input box and "how it works".
+ * During and after: the live results (ResultView), or an error message.
+ */
 import { AlertCircle, RotateCcw } from "lucide-react";
 import InputPanel from "../components/InputPanel.jsx";
 import ResultView from "../components/ResultView.jsx";

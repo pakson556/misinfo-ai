@@ -1,3 +1,9 @@
+# GitHub Actions: runs automatically on GitHub every time you push to main or v2.
+# See results in your repo's "Actions" tab. A red X means something broke:
+#   backend   -> lint + all backend tests
+#   training  -> data prep + baseline on synthetic data
+#   frontend  -> lint + production build
+#   docker    -> builds both Docker images (only if the above pass)
 name: CI
 
 on:

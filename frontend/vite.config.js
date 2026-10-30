@@ -1,3 +1,6 @@
+// Vite = the development server and build tool for the frontend.
+//   npm run dev    -> live-reloading dev site at http://localhost:5173
+//   npm run build  -> optimised files in dist/ (what the Docker image serves)
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 

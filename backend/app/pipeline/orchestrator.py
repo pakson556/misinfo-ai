@@ -1,6 +1,22 @@
-"""Runs the full analysis and streams progress events.
+"""
+The conductor: runs every step of a check in order and reports progress as it goes.
 
-Events (all dicts with "event" and "data"):
+THE STEPS (each one lives in its own file)
+    0. input      send the text straight back, so the page can show it immediately
+    1. claims     find the checkable claims            -> llm/ (Claude, Ollama or rules)
+    2. signals    persuasion tactics + style model     -> tactics.py, style.py   (instant, local)
+    3. verify     for EACH claim, at the same time:
+                    a. gather evidence                 -> retrieval.py
+                    b. judge the claim vs the evidence -> llm/
+    4. summary    combine into one verdict             -> aggregate.py
+                  + a short headline/summary           -> llm/
+
+STREAMING
+    run_analysis() is an *async generator*: instead of returning one value at
+    the end, it `yield`s small events while it works. main.py forwards each one
+    to the browser, which is why the page fills in step by step.
+
+    The events, in order (each is a dict {"event": name, "data": ...}):
   input         {"text": str, "input_type": str, "source_url": str|None}
   stage         {"stage": str, "status": "running"|"done"|"skipped", "detail": str}
   claims        {"claims": [Claim]}
@@ -9,6 +25,11 @@ Events (all dicts with "event" and "data"):
   claim_result  ClaimResult
   result        AnalysisResult
   error         {"message": str}
+
+NOTHING HERE IS ALLOWED TO CRASH THE CHECK
+    If the AI fails, we fall back to simpler methods. If a claim takes too long,
+    it's marked "unverifiable". Problems are added to `warnings`, which the page
+    shows in amber, instead of the whole check failing.
 """
 
 from __future__ import annotations
@@ -37,13 +58,21 @@ log = logging.getLogger(__name__)
 
 
 def _ev(event: str, data: Any) -> dict:
+    """Package one progress event. Pydantic objects are turned into plain JSON-ready dicts."""
     if hasattr(data, "model_dump"):
         data = data.model_dump(mode="json")
     return {"event": event, "data": data}
 
 
 def locate_span(text: str, quote: str, claim: str) -> Span | None:
-    """Find where a claim came from in the original text, for highlighting."""
+    """
+    Find where a claim came from in the original text, so the page can highlight it.
+
+    The AI gives back a `quote` (the exact words it took the claim from) and the
+    rewritten `claim`. Try an exact (case-insensitive) search for each first.
+    If the AI changed the wording slightly, fall back to fuzzy matching.
+    Returns None if nothing matches well enough (the claim is then listed but not highlighted).
+    """
     for needle in (quote, claim):
         needle = (needle or "").strip()
         if len(needle) < 6:
@@ -51,7 +80,8 @@ def locate_span(text: str, quote: str, claim: str) -> Span | None:
         i = text.lower().find(needle.lower())
         if i >= 0:
             return Span(start=i, end=i + len(needle), text=text[i : i + len(needle)])
-    # Fuzzy: best matching sentence-sized window
+    # Fuzzy: slide a window along the text in 20-character steps and keep the
+    # position that looks most like the quote (score 0-100; 80+ counts as a match).
     target = quote or claim
     best, best_score = None, 0.0
     for start in range(0, max(1, len(text) - 20), 20):
@@ -65,13 +95,23 @@ def locate_span(text: str, quote: str, claim: str) -> Span | None:
 
 
 async def _check_claim(claim: Claim, context: str, use_web: bool, warnings: list[str], sources_used: set[str]) -> ClaimResult:
+    """
+    Check ONE claim: gather evidence, ask the AI for a verdict, tidy up the sources.
+
+    run_analysis() starts one of these per claim and runs them at the same time,
+    so 5 claims take about as long as the slowest one, not 5x as long.
+    `warnings` and `sources_used` are shared lists that every claim adds to.
+    """
     provider = get_provider()
     evidence: list[Evidence] = []
+    # a) Evidence from Google Fact Check, Wikipedia, etc. (skipped if "Search the web" is unticked)
     if use_web:
         evidence, used, warns = await gather_evidence(claim.text)
         sources_used.update(used)
         warnings.extend(w for w in warns if w not in warnings)
 
+    # b) Verdict. If the AI call fails (network, API limit, ...), don't give up:
+    #    fall back to matching published fact-checks.
     method = "llm" if not isinstance(provider, HeuristicProvider) else "factcheck_match"
     try:
         outcome = await provider.verify_claim(claim.text, evidence, context, allow_search=use_web)
@@ -83,6 +123,8 @@ async def _check_claim(claim: Claim, context: str, use_web: bool, warnings: list
         outcome = await HeuristicProvider().verify_claim(claim.text, evidence, context, use_web)
         method = "factcheck_match"
 
+    # c) Record what the AI concluded about each source ("supports", "refutes", ...),
+    #    and add any extra sources Claude found with its own web search.
     for idx, stance in outcome.stances.items():
         if 0 <= idx < len(evidence):
             evidence[idx].stance = stance  # type: ignore[assignment]
@@ -113,16 +155,25 @@ async def run_analysis(
     source_url: str | None = None,
     extracted_text: str | None = None,
 ) -> AsyncIterator[dict]:
+    """
+    Run a full check on `text`, yielding progress events (see the top of this file).
+
+    use_web         search for evidence online (the checkbox on the page)
+    input_type      "text", "url" or "image": only used for display/history
+    source_url      the link, if the input came from one
+    extracted_text  the OCR'd text, if the input was a screenshot
+    """
     s = get_settings()
-    provider = get_provider()
+    provider = get_provider()  # Claude, Ollama or the no-AI fallback, depending on settings
     started = time.perf_counter()
-    deadline = started + s.pipeline_budget_s
+    deadline = started + s.pipeline_budget_s  # hard time limit for the whole check
     timings: dict[str, float] = {}
     warnings: list[str] = []
     sources_used: set[str] = set()
     text = text.strip()[: s.max_input_chars]
 
     def mark(name: str, t0: float) -> None:
+        """Record how many milliseconds a stage took (shown at the bottom of the result)."""
         timings[name] = round((time.perf_counter() - t0) * 1000, 1)
 
     yield _ev("input", {"text": text, "input_type": input_type, "source_url": source_url})
@@ -131,8 +182,10 @@ async def run_analysis(
     yield _ev("stage", {"stage": "claims", "status": "running", "detail": "Finding checkable claims"})
     t0 = time.perf_counter()
     try:
+        # Ask the AI to list the checkable claims (gives up after 30 seconds).
         extracted = await asyncio.wait_for(provider.extract_claims(text, s.max_claims), timeout=30)
     except Exception as e:  # noqa: BLE001
+        # AI unavailable -> pick out factual-looking sentences with simple rules instead.
         log.warning("claim extraction failed: %r", e)
         if not isinstance(provider, HeuristicProvider):
             warnings.append(f"AI claim extraction failed ({type(e).__name__}); used sentence analysis instead.")
@@ -159,14 +212,18 @@ async def run_analysis(
         detail = "Searching sources and weighing evidence" if use_web else "Checking without web search"
         yield _ev("stage", {"stage": "verify", "status": "running", "detail": detail})
         t0 = time.perf_counter()
+        # Start checking every claim at once (each is an asyncio "task" running in parallel).
         tasks = {asyncio.create_task(_check_claim(c, text, use_web, warnings, sources_used)): c for c in claims}
         remaining = max(5.0, deadline - time.perf_counter())
         try:
+            # as_completed hands back each claim the moment it finishes, in whatever order
+            # they finish, so a quick claim turns green/red without waiting for slow ones.
             for fut in asyncio.as_completed(list(tasks), timeout=remaining):
                 r = await fut
                 results[r.claim.id] = r
                 yield _ev("claim_result", r)
         except TimeoutError:
+            # Out of time: stop the unfinished claims and mark them unverifiable.
             warnings.append("Some claims took too long to check and were marked unverifiable.")
             for task, c in tasks.items():
                 if c.id not in results:
@@ -189,7 +246,9 @@ async def run_analysis(
     # 4) Aggregate + summary ------------------------------------------------
     yield _ev("stage", {"stage": "summary", "status": "running", "detail": "Writing the verdict"})
     t0 = time.perf_counter()
+    # Combine everything into one overall verdict + risk + confidence (the maths is in aggregate.py).
     overall, risk, confidence = aggregate(claim_results, tactics_score, style)
+    # Start with a ready-made headline and summary, then ask the AI for a nicer one if time allows.
     headline, summary = HEADLINES[overall], default_summary(overall, claim_results, tactics)
     if claim_results and deadline - time.perf_counter() > 3:
         payload = "\n".join(
@@ -211,8 +270,9 @@ async def run_analysis(
     mark("summary", t0)
     timings["total"] = round((time.perf_counter() - started) * 1000, 1)
 
+    # Package the final answer (shape defined in schemas.py).
     result = AnalysisResult(
-        id=uuid.uuid4().hex[:12],
+        id=uuid.uuid4().hex[:12],  # random 12-character id, used in /a/<id> share links
         created_at=datetime.now(UTC),
         input_type=input_type,  # type: ignore[arg-type]
         input_preview=text[:280],
@@ -242,7 +302,7 @@ async def run_analysis(
 
 
 async def analyze(text: str, **kw) -> AnalysisResult:
-    """Non-streaming convenience wrapper."""
+    """Run a check and just return the final result (no streaming). Handy in scripts and notebooks."""
     final = None
     async for e in run_analysis(text, **kw):
         if e["event"] == "result":

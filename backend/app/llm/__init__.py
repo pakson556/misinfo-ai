@@ -1,3 +1,17 @@
+"""
+The AI layer ("LLM" = large language model).
+
+Three interchangeable "providers" do the same three jobs in different ways:
+
+    job                 AnthropicProvider (Claude)   OllamaProvider (local)   HeuristicProvider (no AI)
+    extract_claims      Claude Haiku                 local model              sentence rules
+    verify_claim        Claude Opus + web search     local model              match published fact-checks
+    summarize           Claude Haiku                 local model              (none; uses default text)
+
+The rest of the app only ever calls get_provider() and those three methods, so
+switching between them is just LLM_PROVIDER=... in backend/.env. No code changes.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -10,8 +24,9 @@ from .heuristic_provider import HeuristicProvider
 log = logging.getLogger(__name__)
 
 
-@lru_cache
+@lru_cache  # build the provider once and reuse it
 def get_provider() -> LLMProvider:
+    """Pick the provider from settings. Falls back to the no-AI provider if Claude has no key."""
     s = get_settings()
     if s.llm_provider == "anthropic":
         if s.anthropic_api_key:

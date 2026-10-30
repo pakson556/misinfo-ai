@@ -1,3 +1,13 @@
+/*
+ * The page frame: header + navigation, and which page shows for which address.
+ *
+ *   /            Check     (paste / link / screenshot, then see results)
+ *   /a/:id       Report    (a saved check, e.g. from History or a shared link)
+ *   /history     History   (list of past checks)
+ *   /insights    Insights  (charts; loaded only when visited, to keep the first load fast)
+ *
+ * React Router swaps the page without reloading the browser.
+ */
 import { Suspense, lazy, useEffect, useState } from "react";
 import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
 import { api } from "./lib/api.js";
@@ -8,6 +18,8 @@ import Report from "./pages/Report.jsx";
 const Insights = lazy(() => import("./pages/Insights.jsx"));
 
 function Header() {
+  // Ask the backend what's switched on, once when the page loads.
+  // The answer decides which warning banner (if any) to show below the header.
   const [health, setHealth] = useState(null);
   useEffect(() => {
     api.health().then(setHealth).catch(() => setHealth({ status: "down" }));

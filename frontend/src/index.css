@@ -1,3 +1,8 @@
+/*
+ * Global styles. Tailwind handles most styling inline; this file holds the few
+ * custom pieces: the claim highlight colours, the tactic underline, the loading
+ * shimmer, the verdict's entrance animation, and reduced-motion support.
+ */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

@@ -1,3 +1,7 @@
+/*
+ * /a/<id>: shows one saved check, loaded from the backend's history.
+ * This is what a "Copy link" link opens.
+ */
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import ResultView from "../components/ResultView.jsx";

@@ -1,6 +1,14 @@
+/*
+ * Every call from the website to the backend goes through this file.
+ *
+ * In Docker and in dev mode the API is on the same address as the website
+ * (/api/...): nginx or Vite forwards it to the backend. To point at a backend
+ * elsewhere, build with VITE_API_URL=https://your-backend.example.com
+ */
 // Base URL: empty means same origin (/api is proxied by Vite in dev and nginx in Docker).
 const BASE = (import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
 
+// fetch() wrapper: turns network failures and error responses into readable messages.
 async function request(path, options = {}) {
   let res;
   try {
@@ -12,6 +20,8 @@ async function request(path, options = {}) {
   return res;
 }
 
+// Pull a human-readable message out of an error response.
+// FastAPI validation errors come as a list, so we join their messages.
 async function errorMessage(res) {
   try {
     const data = await res.json();
@@ -26,6 +36,13 @@ async function errorMessage(res) {
 }
 
 /**
+ * Why not use the browser's built-in EventSource? It only supports GET requests,
+ * and we need POST to send the text/screenshot. So we read the stream by hand:
+ * SSE is plain text where each event looks like
+ *     event: claim_result
+ *     data: {"claim": ...}
+ *     (blank line)
+ *
  * Read a Server-Sent Events stream from a POST response and call onEvent(name, data)
  * for each event. Resolves when the stream ends.
  */
@@ -62,6 +79,7 @@ async function readStream(res, onEvent, signal) {
   if (buffer.trim()) flush(buffer);
 }
 
+// The functions the pages use, one per backend endpoint (see backend/app/main.py).
 export const api = {
   health: () => request("/api/health").then((r) => r.json()),
 

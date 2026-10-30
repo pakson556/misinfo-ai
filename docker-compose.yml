@@ -1,33 +1,57 @@
-# docker compose up --build   ->  open http://localhost:8080
+# =============================================================================
+# docker-compose.yml: runs the whole app with one command.
+#
+#   docker compose up --build      build (if needed) and start everything
+#   docker compose up -d --build   same, but in the background ("detached")
+#   docker compose down            stop and remove the containers (your data is kept)
+#   docker compose logs -f backend watch the backend's log live
+#
+# Then open http://localhost:8080
+#
+# It describes "services" (containers) and how they connect:
+#
+#   your browser --> frontend (nginx, port 8080) --/api/--> backend (Python, port 8000)
+#                                                              |
+#                                                       misinfo-data volume
+#                                                    (database + cache, kept between runs)
+# =============================================================================
+
 services:
   backend:
-    build: ./backend
+    build: ./backend  # build from backend/Dockerfile
     env_file:
+      # Your settings and API keys. "required: false" = still starts if the file is missing.
       - path: ./backend/.env
         required: false
     environment:
+      # Allow the website on port 8080 to call the API.
       CORS_ORIGINS: http://localhost:8080
     volumes:
+      # A "volume" is storage Docker keeps OUTSIDE the container, so your history
+      # survives rebuilds and restarts. Mounted at /app/data inside the container.
       - misinfo-data:/app/data
-    restart: unless-stopped
+    # Note: no "ports:" here. The backend isn't reachable from your Mac directly,
+    # only through the frontend's /api/ forwarding. Fewer open doors.
+    restart: unless-stopped  # restart automatically if it crashes or the Mac reboots
 
   frontend:
-    build: ./frontend
+    build: ./frontend  # build from frontend/Dockerfile
     ports:
-      - "8080:8080"
+      - "8080:8080"  # "your Mac's port : container's port" -> http://localhost:8080
     depends_on:
       backend:
-        condition: service_healthy
+        condition: service_healthy  # wait until the backend's health check passes
     restart: unless-stopped
 
-  # Optional local LLM: `docker compose --profile ollama up`, then set LLM_PROVIDER=ollama
-  # and OLLAMA_BASE_URL=http://ollama:11434 in backend/.env
+  # Optional free local AI model. Only starts with: docker compose --profile ollama up
+  # Then set LLM_PROVIDER=ollama and OLLAMA_BASE_URL=http://ollama:11434 in backend/.env
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:latest  # a ready-made image; nothing to build
     profiles: ["ollama"]
     volumes:
-      - ollama-models:/root/.ollama
+      - ollama-models:/root/.ollama  # keep downloaded models between runs
 
+# The named volumes used above.
 volumes:
   misinfo-data:
   ollama-models:

@@ -1,3 +1,7 @@
+/*
+ * The top-right of a result: the progress steps, the overall verdict badge,
+ * headline, summary, risk bar, "how sure we are" dots, guidance and warnings.
+ */
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import { OVERALL, confidenceWord, pct } from "../lib/verdicts.js";
 

@@ -1,4 +1,13 @@
-"""Local LLM via Ollama. Free and private, but no built-in web search."""
+"""
+A free AI model running on your own machine via Ollama (https://ollama.com).
+
+Free and private (nothing leaves your computer), but slower, less accurate than
+Claude, and with no web search of its own. It still gets the Google Fact
+Check / Wikipedia evidence. To use it: install Ollama, run `ollama pull llama3.1:8b`,
+then set LLM_PROVIDER=ollama in backend/.env.
+
+Ollama's "format" option forces the reply to match our JSON schema.
+"""
 
 from __future__ import annotations
 
@@ -30,6 +39,7 @@ class OllamaProvider:
         self.model = model
 
     async def _chat(self, system: str, user: str, schema: dict) -> dict:
+        """Send one question to the local model and get back JSON matching `schema`."""
         r = await http.client().post(
             f"{self.base_url}/api/chat",
             json={
@@ -72,7 +82,7 @@ class OllamaProvider:
             if 0 <= i < len(evidence):
                 stances[i] = j.get("stance", "neutral")
         v = data.get("verdict", "UNVERIFIABLE")
-        # A local model with no evidence should not be trusted to recall facts.
+        # A small local model with no evidence would just be guessing from memory: don't let it.
         if not evidence and v != "UNVERIFIABLE":
             v, data["confidence"] = "UNVERIFIABLE", 0.2
         return VerifyOutcome(

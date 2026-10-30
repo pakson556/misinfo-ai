@@ -1,4 +1,15 @@
-"""Metrics, calibration and threshold selection shared by all models."""
+"""
+Scoring tools shared by baseline.py and finetune.py.
+
+Key terms:
+  ROC-AUC     0.5 = coin flip, 1.0 = perfect ranking of false-vs-true texts. Threshold-free.
+  PR-AUC      like ROC-AUC but focused on the misinformation class; better when it's rare.
+  macro-F1    F1 averaged over both classes, so ignoring one class can't score well.
+  Brier / ECE calibration: when the model says "70%", is it right about 70% of the time?
+  threshold   the probability above which we say "misinformation"; chosen on val, not test.
+  LODO        leave-one-dataset-out: train without dataset X, test on X. The honest
+              measure of whether the model generalises to sources it has never seen.
+"""
 
 from __future__ import annotations
 

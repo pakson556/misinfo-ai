@@ -1,3 +1,10 @@
+/*
+ * The whole result layout: annotated text on the left (sticky while you scroll on
+ * wide screens), verdict + claims + tactics on the right. It's used both for a
+ * live check and for a saved one.
+ *
+ * `a` is the state from useAnalysis(). Everything here just draws it.
+ */
 import { Link2, Share2 } from "lucide-react";
 import { useState } from "react";
 import AnnotatedText from "./AnnotatedText.jsx";

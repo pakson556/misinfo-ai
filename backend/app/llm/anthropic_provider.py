@@ -1,5 +1,20 @@
-"""Claude provider: structured claim extraction, cited verification with Claude's
-own server-side web search, and summaries."""
+"""
+Claude (Anthropic's API) as the AI. The best-quality option; needs ANTHROPIC_API_KEY.
+
+TWO MODELS, TO BALANCE COST AND QUALITY
+    LLM_FAST_MODEL (Haiku):  finding claims, writing summaries   (quick, cheap)
+    LLM_MODEL      (Opus):   judging each claim                  (careful, the hard part)
+
+TOOLS = STRUCTURED ANSWERS
+    We give Claude a "tool" (e.g. report_verdict) whose input is our JSON schema,
+    and tell it to call that tool. Its "call" IS the answer, already in the exact
+    shape we need. Nothing is executed; it's just a reliable way to get JSON.
+
+CLAUDE'S OWN WEB SEARCH
+    When judging, Claude can also run web searches (Anthropic runs them; ~$10 per
+    1,000). Sources it finds are added to the claim's evidence. Capped by
+    LLM_MAX_SEARCHES_PER_CLAIM.
+"""
 
 from __future__ import annotations
 
@@ -25,6 +40,7 @@ log = logging.getLogger(__name__)
 
 
 def _block_get(block, key, default=None):
+    """Read a field from a response block, whether the SDK gave us an object or a dict."""
     if isinstance(block, dict):
         return block.get(key, default)
     return getattr(block, key, default)
@@ -35,6 +51,7 @@ class AnthropicProvider:
     can_search = True
 
     def __init__(self, api_key: str, model: str, fast_model: str, web_search: bool, max_searches: int):
+        # The official Anthropic Python SDK. Retries twice on temporary errors.
         from anthropic import AsyncAnthropic
 
         self.client = AsyncAnthropic(api_key=api_key, max_retries=2, timeout=60.0)
@@ -44,6 +61,7 @@ class AnthropicProvider:
         self.max_searches = max_searches
 
     async def _forced_tool(self, *, model: str, system: str, user: str, tool_name: str, schema: dict, max_tokens: int):
+        """Ask Claude one question and force the answer into `schema` (see TOOLS above)."""
         resp = await self.client.messages.create(
             model=model,
             max_tokens=max_tokens,
@@ -78,6 +96,13 @@ class AnthropicProvider:
 
     # ------------------------------------------------------------------ verify
     async def verify_claim(self, claim: str, evidence: list[Evidence], context: str, allow_search: bool) -> VerifyOutcome:
+        """
+        Judge one claim. This is a short back-and-forth ("agentic loop"):
+          1. Send the claim + our evidence. Claude may run web searches first.
+          2. Collect any sources its searches found.
+          3. When it calls report_verdict, that's the answer.
+        After 3 rounds we force it to decide, so a check can't loop forever.
+        """
         use_search = allow_search and self.web_search
         system = VERIFY_SYSTEM.format(
             today=date.today().isoformat(),
@@ -105,7 +130,7 @@ class AnthropicProvider:
         searches = 0
 
         for step in range(5):
-            force = step >= 3  # stop searching and decide
+            force = step >= 3  # after 3 rounds: no more searching, give a verdict now
             resp = await self.client.messages.create(
                 model=self.model,
                 max_tokens=2500,
@@ -117,9 +142,10 @@ class AnthropicProvider:
             verdict_input = None
             for block in resp.content:
                 btype = _block_get(block, "type")
-                if btype == "server_tool_use":
+                # Walk through Claude's reply piece by piece.
+                if btype == "server_tool_use":  # Claude ran a web search
                     searches += 1
-                elif btype == "web_search_tool_result":
+                elif btype == "web_search_tool_result":  # the search results: keep them as evidence
                     content = _block_get(block, "content")
                     if isinstance(content, list):
                         for item in content:
@@ -155,6 +181,7 @@ class AnthropicProvider:
         raise RuntimeError("Verification did not converge")
 
     def _outcome(self, data: dict, evidence: list[Evidence], found: dict[str, Evidence], searches: int) -> VerifyOutcome:
+        """Turn Claude's report_verdict answer into a VerifyOutcome, double-checking every value."""
         stances: dict[int, str] = {}
         for j in data.get("evidence_judgements") or []:
             try:

@@ -1,7 +1,16 @@
-"""Domain classification and credibility priors.
+"""
+Website reputation: what kind of source a link is, and how much to trust it to start with.
 
-These are *priors*, not truth: a credible outlet can be wrong and an unknown blog
-can be right. They are only used to weight evidence, never as a verdict on their own.
+    classify("https://www.snopes.com/fact-check/x")  -> ("factcheck", 0.92)
+    classify("https://www.bbc.co.uk/news/...")         -> ("news", 0.88)
+    classify("https://randomblog.example/post")        -> ("web", 0.45)
+
+These numbers are *starting assumptions* ("priors"), not truth: a credible
+outlet can be wrong and an unknown blog can be right. They're only used to
+rank and weight evidence, never as a verdict on their own. The kind is also
+shown as a small label next to each source on the page ("Fact-check", "News", ...).
+
+To trust or distrust a site differently, edit the lists below.
 """
 
 from __future__ import annotations
@@ -10,6 +19,8 @@ from urllib.parse import urlparse
 
 from ..schemas import SourceKind
 
+# Recognised fact-checking organisations. Entries with a "/" match a section of a
+# bigger site (e.g. only Reuters' fact-check pages, not all of reuters.com).
 FACTCHECKERS = {
     "snopes.com",
     "factcheck.org",
@@ -39,6 +50,7 @@ FACTCHECKERS = {
     "washingtonpost.com/politics/fact-checker",
 }
 
+# Established news outlets and their starting trust score.
 NEWS = {
     "reuters.com": 0.9,
     "apnews.com": 0.9,
@@ -72,9 +84,11 @@ NEWS = {
     "science.org": 0.92,
 }
 
+# Official / public-health bodies.
 GOVERNMENT_SUFFIXES = (".gov", ".gov.uk", ".gov.au", ".gc.ca", ".gov.gh", ".europa.eu", ".mil")
 GOVERNMENT_DOMAINS = {"who.int", "un.org", "nhs.uk", "ecdc.europa.eu", "ema.europa.eu", "ipcc.ch", "worldbank.org"}
 
+# Universities, journals and research databases (matched anywhere in the domain).
 SCIENCE_HINTS = (
     ".edu",
     ".ac.uk",
@@ -95,6 +109,7 @@ SCIENCE_HINTS = (
 
 ENCYCLOPEDIA = {"wikipedia.org": 0.75, "britannica.com": 0.85}
 
+# Known unreliable or satirical sites: heavily down-weighted.
 LOW_CRED = {
     "infowars.com",
     "naturalnews.com",
@@ -110,6 +125,7 @@ SATIRE = {"theonion.com", "babylonbee.com", "thedailymash.co.uk", "newsthump.com
 
 
 def domain_of(url: str) -> str:
+    """ "https://www.bbc.co.uk/news/x" -> "bbc.co.uk"."""
     try:
         host = urlparse(url).netloc.lower()
     except ValueError:
@@ -118,6 +134,11 @@ def domain_of(url: str) -> str:
 
 
 def _matches(host: str, path: str, entries) -> str | None:
+    """
+    Return the list entry this site matches, or None.
+    Subdomains count ("news.bbc.co.uk" matches "bbc.co.uk") but look-alikes don't
+    ("evil-bbc.co.uk.example.net" does not).
+    """
     full = host + path
     for e in entries:
         if "/" in e:
@@ -129,7 +150,7 @@ def _matches(host: str, path: str, entries) -> str | None:
 
 
 def classify(url: str) -> tuple[SourceKind, float]:
-    """Return (kind, credibility prior in 0..1) for a URL."""
+    """Return (kind, starting trust 0..1) for a URL. Checked in order: the first match wins."""
     host = domain_of(url)
     if not host:
         return "web", 0.4
@@ -153,4 +174,5 @@ def classify(url: str) -> tuple[SourceKind, float]:
 
 
 def is_satire(url: str) -> bool:
+    """True for joke news sites, so the page can warn "this is satire"."""
     return bool(_matches(domain_of(url), "", SATIRE))

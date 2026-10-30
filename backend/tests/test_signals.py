@@ -1,3 +1,9 @@
+"""
+Unit tests for the parts that don't need the network: tactic detection, claim
+picking, fact-check rating translation, the verdict maths, and source reputation.
+Several tests pin down v1 bugs so they can never come back (e.g. "ai" matching "said").
+"""
+
 from app.llm.heuristic_provider import heuristic_claims, match_factchecks, rating_to_verdict
 from app.pipeline.aggregate import aggregate
 from app.pipeline.orchestrator import locate_span

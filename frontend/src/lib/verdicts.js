@@ -1,4 +1,8 @@
-// Single source of truth for verdict wording and colour.
+/*
+ * Display settings for verdicts: the label shown to people and the colour classes.
+ * Change a label or colour here and it changes everywhere on the site.
+ * The colours themselves (refuted, mixed, supported, ...) are defined in tailwind.config.js.
+ */
 
 export const CLAIM = {
   REFUTED: { label: "False", tone: "refuted", text: "text-refuted", bg: "bg-refuted-wash", bar: "bg-refuted", mark: "mark-refuted" },

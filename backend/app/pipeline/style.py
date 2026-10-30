@@ -1,15 +1,25 @@
-"""Optional writing-style classifier.
+"""
+The optional machine-learning "style" model: the part that connects to your training work.
 
-Answers a narrower question than the claim checker: "does this text *read* like
-the misinformation in our training data?" It is a weak signal by design (style
-models are easy to fool and pick up dataset quirks), so the aggregator gives it
-little weight and the UI labels it clearly.
+WHAT IT ANSWERS
+    "Does this text *read* like the misinformation in our training datasets?"
+    That's a narrower question than "is it true?". Style models are easy to fool
+    and pick up quirks of their datasets, so this is a weak signal by design:
+    aggregate.py gives it little weight, and the UI labels it clearly.
 
-Expected layout of STYLE_MODEL_DIR (written by training/export.py):
-  meta.json           {"type": "onnx"|"sklearn", "name": ..., "temperature": 1.0, "max_length": 256,
-                       "metrics": {...}}
-  model.onnx + tokenizer.json            (type onnx)
-  model.joblib                           (type sklearn; a Pipeline taking raw text)
+IS IT ON?
+    Only if a trained model exists in backend/models/style/. With no model the
+    app works normally and simply shows the style signal as unavailable.
+
+HOW TO CREATE ONE (see training/README.md)
+    training/baseline.py  -> TF-IDF + logistic regression, saved as model.joblib  (runs on a laptop)
+    training/finetune.py  -> fine-tuned transformer, saved as model.onnx          (needs a GPU, e.g. Colab)
+
+Expected files in STYLE_MODEL_DIR:
+  meta.json                  {"type": "onnx"|"sklearn", "name": ..., "temperature": 1.0,
+                              "max_length": 256, "metrics": {...}}
+  model.onnx + tokenizer.json   (type "onnx": run with onnxruntime, no PyTorch needed)
+  model.joblib                  (type "sklearn": a scikit-learn Pipeline that takes raw text)
 """
 
 from __future__ import annotations
@@ -27,22 +37,26 @@ log = logging.getLogger(__name__)
 
 
 class _OnnxStyle:
+    """Runs a fine-tuned transformer exported to ONNX (made by training/finetune.py)."""
+
     def __init__(self, d: Path, meta: dict):
         import numpy as np
         import onnxruntime as ort
         from tokenizers import Tokenizer
 
         self.np = np
+        # The tokenizer splits text into the numbered word-pieces the model was trained on.
         self.max_length = int(meta.get("max_length", 256))
         self.temperature = float(meta.get("temperature", 1.0))
         self.tok = Tokenizer.from_file(str(d / "tokenizer.json"))
         self.tok.enable_truncation(self.max_length)
         opts = ort.SessionOptions()
-        opts.intra_op_num_threads = 2
+        opts.intra_op_num_threads = 2  # don't hog every CPU core on a small server
         self.sess = ort.InferenceSession(str(d / "model.onnx"), opts, providers=["CPUExecutionProvider"])
         self.inputs = {i.name for i in self.sess.get_inputs()}
 
     def predict(self, text: str) -> float:
+        """Probability (0..1) that the text reads like misinformation."""
         np = self.np
         enc = self.tok.encode(text)
         feed = {
@@ -52,11 +66,16 @@ class _OnnxStyle:
         if "token_type_ids" in self.inputs:
             feed["token_type_ids"] = np.array([enc.type_ids], dtype=np.int64)
         logits = self.sess.run(None, {k: v for k, v in feed.items() if k in self.inputs})[0][0]
+        # The model outputs two scores ("logits") for [credible, misinformation].
+        # Their difference, divided by the calibration temperature, goes through a
+        # sigmoid to become a probability between 0 and 1.
         z = (float(logits[1]) - float(logits[0])) / self.temperature
         return 1 / (1 + math.exp(-z))
 
 
 class _SklearnStyle:
+    """Runs the TF-IDF baseline saved by training/baseline.py."""
+
     def __init__(self, d: Path, meta: dict):
         import joblib
 
@@ -66,8 +85,9 @@ class _SklearnStyle:
         return float(self.model.predict_proba([text])[0][1])
 
 
-@lru_cache
+@lru_cache  # load the model once, the first time it's needed
 def _load():
+    """Load whichever model is in STYLE_MODEL_DIR. Returns (None, None) if there isn't one or it's broken."""
     d = get_settings().style_model_dir
     meta_path = d / "meta.json"
     if not meta_path.exists():
@@ -83,11 +103,13 @@ def _load():
 
 
 def style_model_name() -> str | None:
+    """Name of the installed model, or None. Shown in /api/health and the start-up log."""
     _, meta = _load()
     return meta.get("name") if meta else None
 
 
 def style_signal(text: str) -> StyleSignal:
+    """Score one text. Called by the orchestrator for every check."""
     model, meta = _load()
     if model is None:
         return StyleSignal(available=False, note="No style model installed. Train one with the scripts in /training.")

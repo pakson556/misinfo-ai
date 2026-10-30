@@ -1,3 +1,13 @@
+"""
+Shared test setup (pytest loads this automatically before any test).
+
+Every test run gets a fresh temporary folder for the database and cache, and
+all API keys are blanked, so tests never touch your real data, never call
+paid APIs, and give the same result on any machine.
+
+Run all tests:  cd backend && pytest -q
+"""
+
 import os
 import tempfile
 

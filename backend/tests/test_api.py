@@ -1,3 +1,11 @@
+"""
+End-to-end tests of the API, run against the real FastAPI app.
+
+FakeProvider stands in for Claude, so these run with no key and no network.
+Outside services (Google, Wikipedia) are faked with `respx`, which intercepts
+HTTP calls and returns canned responses.
+"""
+
 import json
 
 import httpx

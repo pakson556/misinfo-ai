@@ -1,3 +1,8 @@
+/*
+ * "How it's written": the persuasion tactics found (with example phrases and a
+ * strength bar) and, if a style model is installed, its score. The checkbox turns
+ * the dotted underlines in the text on or off.
+ */
 import { pct } from "../lib/verdicts.js";
 
 export default function WritingSignals({ tactics, score, style, showTactics, onToggle }) {

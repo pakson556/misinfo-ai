@@ -1,3 +1,8 @@
+/*
+ * The input box on the home page, with three tabs: Text, Link and Screenshot.
+ * Screenshots can be chosen, dragged in, or pasted anywhere on the page (Cmd+V).
+ * "Try" buttons fill in example posts. Cmd/Ctrl+Enter submits.
+ */
 import { FileText, ImageUp, Link2, Loader2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
