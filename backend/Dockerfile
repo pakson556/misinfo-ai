@@ -39,7 +39,10 @@ COPY models ./models
 
 # Security: run as a normal user, not "root" (administrator).
 # /app/data is where the database and cache are written.
-RUN useradd --create-home --uid 1000 app && mkdir -p /app/data && chown -R app /app/data
+# "chmod -R a+rX" makes the code readable by that user even if the files on your
+# computer were saved as private (owner-only); without it the server can't start.
+RUN useradd --create-home --uid 1000 app && mkdir -p /app/data && chown -R app /app/data \
+    && chmod -R a+rX /app/app /app/models
 USER app
 
 ENV DATA_DIR=/app/data
