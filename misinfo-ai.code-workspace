@@ -1,0 +1,169 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "python.defaultInterpreterPath": "${workspaceFolder}/backend/.venv/bin/python",
+    "python.analysis.extraPaths": [
+      "${workspaceFolder}/backend",
+      "${workspaceFolder}/training"
+    ],
+    "python.testing.pytestEnabled": true,
+    "python.testing.cwd": "${workspaceFolder}/backend",
+    "python.testing.pytestArgs": [
+      "tests"
+    ],
+    "[python]": {
+      "editor.defaultFormatter": "charliermarsh.ruff",
+      "editor.formatOnSave": true,
+      "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit"
+      }
+    },
+    "eslint.workingDirectories": [
+      "./frontend"
+    ],
+    "tailwindCSS.experimental.configFile": "frontend/tailwind.config.js",
+    "files.associations": {
+      ".env.example": "dotenv"
+    },
+    "files.exclude": {
+      "**/__pycache__": true,
+      "**/.pytest_cache": true,
+      "**/.ruff_cache": true
+    },
+    "search.exclude": {
+      "**/node_modules": true,
+      "**/dist": true,
+      "backend/data": true
+    }
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-python.python",
+      "ms-python.vscode-pylance",
+      "ms-python.debugpy",
+      "charliermarsh.ruff",
+      "dbaeumer.vscode-eslint",
+      "bradlc.vscode-tailwindcss",
+      "ms-azuretools.vscode-docker",
+      "mikestead.dotenv",
+      "github.vscode-github-actions",
+      "eamodio.gitlens"
+    ]
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": [
+      {
+        "name": "Backend: API (debug)",
+        "type": "debugpy",
+        "request": "launch",
+        "module": "uvicorn",
+        "args": [
+          "app.main:app",
+          "--reload",
+          "--port",
+          "8000"
+        ],
+        "cwd": "${workspaceFolder}/backend",
+        "envFile": "${workspaceFolder}/backend/.env",
+        "python": "${workspaceFolder}/backend/.venv/bin/python",
+        "justMyCode": true
+      },
+      {
+        "name": "Frontend: Chrome (debug)",
+        "type": "chrome",
+        "request": "launch",
+        "url": "http://localhost:5173",
+        "webRoot": "${workspaceFolder}/frontend/src",
+        "preLaunchTask": "Run: frontend dev server"
+      },
+      {
+        "name": "Backend: tests (debug)",
+        "type": "debugpy",
+        "request": "launch",
+        "module": "pytest",
+        "args": [
+          "-q",
+          "tests"
+        ],
+        "cwd": "${workspaceFolder}/backend",
+        "python": "${workspaceFolder}/backend/.venv/bin/python",
+        "justMyCode": false
+      }
+    ],
+    "compounds": [
+      {
+        "name": "Full app (backend + frontend)",
+        "configurations": [
+          "Backend: API (debug)",
+          "Frontend: Chrome (debug)"
+        ],
+        "stopAll": true
+      }
+    ]
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Setup: backend (venv + packages)",
+        "type": "shell",
+        "command": "python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt -r requirements-ml.txt && ([ -f .env ] || cp .env.example .env)",
+        "options": {
+          "cwd": "${workspaceFolder}/backend"
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "Setup: frontend (npm install)",
+        "type": "shell",
+        "command": "npm install",
+        "options": {
+          "cwd": "${workspaceFolder}/frontend"
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "Run: frontend dev server",
+        "type": "shell",
+        "command": "npm run dev",
+        "options": {
+          "cwd": "${workspaceFolder}/frontend"
+        },
+        "isBackground": true,
+        "problemMatcher": {
+          "pattern": {
+            "regexp": "^x"
+          },
+          "background": {
+            "activeBegins": "VITE",
+            "activeEnds": "Local:"
+          }
+        }
+      },
+      {
+        "label": "Run: everything in Docker",
+        "type": "shell",
+        "command": "docker compose up --build",
+        "options": {
+          "cwd": "${workspaceFolder}"
+        },
+        "problemMatcher": []
+      },
+      {
+        "label": "Test: backend",
+        "type": "shell",
+        "command": ".venv/bin/pytest -q",
+        "options": {
+          "cwd": "${workspaceFolder}/backend"
+        },
+        "group": "test",
+        "problemMatcher": []
+      }
+    ]
+  }
+}
