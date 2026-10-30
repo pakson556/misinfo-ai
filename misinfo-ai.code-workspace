@@ -58,6 +58,13 @@
     "version": "0.2.0",
     "configurations": [
       {
+        "name": "Run app in Docker (http://localhost:8080)",
+        "type": "node-terminal",
+        "request": "launch",
+        "command": "docker compose up --build",
+        "cwd": "${workspaceFolder}"
+      },
+      {
         "name": "Backend: API (debug)",
         "type": "debugpy",
         "request": "launch",

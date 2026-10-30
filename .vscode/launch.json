@@ -2,11 +2,23 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Run app in Docker (http://localhost:8080)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "docker compose up --build",
+      "cwd": "${workspaceFolder}"
+    },
+    {
       "name": "Backend: API (debug)",
       "type": "debugpy",
       "request": "launch",
       "module": "uvicorn",
-      "args": ["app.main:app", "--reload", "--port", "8000"],
+      "args": [
+        "app.main:app",
+        "--reload",
+        "--port",
+        "8000"
+      ],
       "cwd": "${workspaceFolder}/backend",
       "envFile": "${workspaceFolder}/backend/.env",
       "python": "${workspaceFolder}/backend/.venv/bin/python",
@@ -25,7 +37,10 @@
       "type": "debugpy",
       "request": "launch",
       "module": "pytest",
-      "args": ["-q", "tests"],
+      "args": [
+        "-q",
+        "tests"
+      ],
       "cwd": "${workspaceFolder}/backend",
       "python": "${workspaceFolder}/backend/.venv/bin/python",
       "justMyCode": false
@@ -34,7 +49,10 @@
   "compounds": [
     {
       "name": "Full app (backend + frontend)",
-      "configurations": ["Backend: API (debug)", "Frontend: Chrome (debug)"],
+      "configurations": [
+        "Backend: API (debug)",
+        "Frontend: Chrome (debug)"
+      ],
       "stopAll": true
     }
   ]
