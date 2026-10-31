@@ -13,6 +13,7 @@ import { BrowserRouter, NavLink, Route, Routes } from "react-router-dom";
 import { api } from "./lib/api.js";
 import Check from "./pages/Check.jsx";
 import History from "./pages/History.jsx";
+import Live from "./pages/Live.jsx";
 import Report from "./pages/Report.jsx";
 
 const Insights = lazy(() => import("./pages/Insights.jsx"));
@@ -37,6 +38,7 @@ function Header() {
         </NavLink>
         <nav className="flex items-center gap-0.5 sm:gap-1">
           <NavLink to="/" end className={link}>Check</NavLink>
+          <NavLink to="/live" className={link}>Live</NavLink>
           <NavLink to="/history" className={link}>History</NavLink>
           <NavLink to="/insights" className={link}>Insights</NavLink>
         </nav>
@@ -64,6 +66,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Check />} />
             <Route path="/a/:id" element={<Report />} />
+            <Route path="/live" element={<Live />} />
             <Route path="/history" element={<History />} />
             <Route path="/insights" element={<Suspense fallback={<p className="pt-10 text-ink-faint">Loading…</p>}><Insights /></Suspense>} />
             <Route path="*" element={<p className="pt-16 text-center text-ink-soft">That page doesn't exist.</p>} />

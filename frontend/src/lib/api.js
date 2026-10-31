@@ -104,4 +104,5 @@ export const api = {
   analysis: (id) => request(`/api/history/${encodeURIComponent(id)}`).then((r) => r.json()),
   remove: (id) => request(`/api/history/${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => r.json()),
   stats: (days = 30) => request(`/api/stats?days=${days}`).then((r) => r.json()),
+  monitor: () => request("/api/monitor").then((r) => r.json()),
 };

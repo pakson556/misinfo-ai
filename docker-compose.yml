@@ -26,6 +26,8 @@ services:
     environment:
       # Allow the website on port 8080 to call the API.
       CORS_ORIGINS: http://localhost:8080
+      # Live page: read public Bluesky posts as they are written. Change to "false" to switch it off.
+      MONITOR_ENABLED: "true"
     volumes:
       # A "volume" is storage Docker keeps OUTSIDE the container, so your history
       # survives rebuilds and restarts. Mounted at /app/data inside the container.

@@ -5,10 +5,12 @@
 import { AlertCircle, RotateCcw } from "lucide-react";
 import InputPanel from "../components/InputPanel.jsx";
 import ResultView from "../components/ResultView.jsx";
+import { useLocation } from "react-router-dom";
 import { useAnalysis } from "../lib/useAnalysis.js";
 
 export default function Check() {
   const a = useAnalysis();
+  const location = useLocation(); // the Live page can send a post here to be checked
   const started = a.status !== "idle";
 
   if (!started) {
@@ -22,7 +24,7 @@ export default function Check() {
           and trusted sources, and shows you which parts are true.
         </p>
         <div className="mt-8">
-          <InputPanel onSubmit={a.run} busy={false} />
+          <InputPanel onSubmit={a.run} busy={false} initialText={location.state?.text || ""} />
         </div>
         <HowItWorks />
       </div>

@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     tavily_api_key: str = ""  # optional paid web search
     enable_wikipedia: bool = True  # free, no key needed
 
+    # --- Live monitor (Live page): reads public Bluesky posts; off unless switched on
+    monitor_enabled: bool = False
+
     # --- Optional trained style model (made by the scripts in training/) ---------
     style_model_dir: Path = BACKEND_DIR / "models" / "style"
 

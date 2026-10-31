@@ -27,9 +27,9 @@ const EXAMPLES = [
   },
 ];
 
-export default function InputPanel({ onSubmit, busy, onCancel }) {
+export default function InputPanel({ onSubmit, busy, onCancel, initialText = "" }) {
   const [mode, setMode] = useState("text");
-  const [text, setText] = useState("");
+  const [text, setText] = useState(initialText);
   const [url, setUrl] = useState("");
   const [file, setFile] = useState(null);
   const [useWeb, setUseWeb] = useState(true);

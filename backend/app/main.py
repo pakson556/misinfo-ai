@@ -37,6 +37,7 @@ from slowapi.util import get_remote_address
 from sse_starlette.sse import EventSourceResponse
 
 from . import db
+from . import monitor as monitor_mod
 from .config import get_settings
 from .llm import get_provider
 from .llm.heuristic_provider import HeuristicProvider
@@ -74,7 +75,11 @@ async def lifespan(app: FastAPI):
         style_model_name(),
         active_sources(),
     )
+    # Live monitor: a background task that reads the public Bluesky stream (see monitor.py).
+    task = asyncio.create_task(monitor_mod.run_forever()) if settings.monitor_enabled else None
     yield
+    if task:
+        task.cancel()
     await http.aclose()  # close the shared HTTP client cleanly on shutdown
 
 
@@ -242,6 +247,12 @@ def delete_analysis(analysis_id: str):
     if not db.delete(analysis_id):
         raise HTTPException(404, "Not found")
     return {"deleted": analysis_id}
+
+
+@app.get("/api/monitor")
+def live_monitor():
+    """Counters and recently flagged posts for the Live page (empty while the monitor is off)."""
+    return monitor_mod.monitor.snapshot()
 
 
 @app.get("/api/stats", response_model=StatsResponse)
