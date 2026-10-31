@@ -261,6 +261,9 @@ def parse_gdelt(data: dict) -> list[dict]:
 
 async def news_forever() -> None:
     """Background task: ask GDELT for the last 24 hours of misinformation-related news, every 15 minutes."""
+    # GDELT limits how often one internet connection may ask. Restarting the app often
+    # would trip that limit, so wait a minute after start-up before the first request.
+    await asyncio.sleep(60)
     while True:
         retry_in = GDELT_EVERY_S
         try:
@@ -292,7 +295,8 @@ async def news_forever() -> None:
             log.warning("GDELT news fetch failed: %r", e)
             monitor.news_error = "World news couldn't be loaded just now. It will try again in a few minutes."
             monitor.news_error_detail = repr(e)[:300]
-            retry_in = 3 * 60
+            # "429 Too Many Requests" = asked too often: back off for longer.
+            retry_in = 10 * 60 if "429" in repr(e) else 3 * 60
         await asyncio.sleep(retry_in)
 
 
