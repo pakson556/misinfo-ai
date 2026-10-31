@@ -98,7 +98,10 @@ export default function ResultView({ a }) {
         )}
         {r && (
           <p className="border-t border-rule pt-4 text-xs leading-relaxed text-ink-faint">
-            Checked in {(r.pipeline.timings_ms.total / 1000).toFixed(1)} seconds
+            Checked{" "}
+            {r.pipeline.timings_ms.total < 1000
+              ? "in under a second"
+              : `in ${(r.pipeline.timings_ms.total / 1000).toFixed(1)} seconds`}
             {r.pipeline.sources_used.length ? ` using ${r.pipeline.sources_used.map(sourceName).join(", ")}` : ""}
             {/claude/i.test(r.pipeline.llm_model || "") ? ", with help from Claude AI" : ""}. Computers can get this wrong, so open
             the sources before you rely on it.
