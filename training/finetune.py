@@ -135,6 +135,43 @@ def export_onnx(model, tok, out_dir: Path, max_len: int) -> None:
     shutil.rmtree(out_dir / "_tok")
 
 
+def leave_one_dataset_out(s: dict[str, pd.DataFrame], args, work: Path) -> dict:
+    """Train once per dataset with that dataset left out, then test on it. The honest score."""
+    lodo = {}
+    for held in sorted(s["train"]["dataset"].unique()):
+        sub = {k: v[v["dataset"] != held].reset_index(drop=True) for k, v in s.items() if k != "test"}
+        te = s["test"][s["test"]["dataset"] == held].reset_index(drop=True)
+        if te["label"].nunique() < 2:
+            continue
+        print(f">> Leave-one-out: training without {held}")
+        t2, tok2 = train_one(sub, args, work / f"lodo_{held}")
+        p = 1 / (1 + np.exp(-logit_diff(t2, to_ds(te, tok2, args.max_len))))
+        lodo[held] = metrics(te["label"], p, 0.5)
+        print(f"   {held}: ROC-AUC {lodo[held].get('roc_auc', float('nan')):.3f}")
+        shutil.rmtree(work / f"lodo_{held}", ignore_errors=True)
+    return lodo
+
+
+def mean_auc(lodo: dict) -> float | None:
+    aucs = [m["roc_auc"] for m in lodo.values() if "roc_auc" in m]
+    return float(np.mean(aucs)) if aucs else None
+
+
+def run_lodo_only(s: dict[str, pd.DataFrame], args, work: Path) -> None:
+    """Add a leave-one-dataset-out score to a model that was already trained into --out."""
+    meta_path, metrics_path = args.out / "meta.json", args.out / "metrics.json"
+    meta = json.loads(meta_path.read_text())
+    summary = json.loads(metrics_path.read_text())
+    lodo = leave_one_dataset_out(s, args, work)
+    summary["leave_one_dataset_out"] = lodo
+    summary["cross_dataset_auc"] = mean_auc(lodo)
+    summary["lodo_settings"] = {"epochs": args.epochs, "max_len": args.max_len, "batch": args.batch}
+    meta.setdefault("metrics", {})["cross_dataset_auc"] = summary["cross_dataset_auc"]
+    meta_path.write_text(json.dumps(meta, indent=2))
+    write_report(args.out, f"Style model: {args.model}", summary)
+    print(json.dumps({"cross_dataset_auc": summary["cross_dataset_auc"]}, indent=2))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", type=Path, default=Path("data"))
@@ -147,10 +184,18 @@ def main() -> None:
     ap.add_argument("--eval-steps", type=int, default=500)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--lodo", action="store_true", help="also run leave-one-dataset-out (one extra training run per dataset)")
+    ap.add_argument(
+        "--lodo-only",
+        action="store_true",
+        help="skip the main model; run only leave-one-dataset-out and add the result to the model already in --out",
+    )
     args = ap.parse_args()
 
     s = load(args.data)
     work = args.out.parent / (args.out.name + "_work")
+    if args.lodo_only:
+        run_lodo_only(s, args, work)
+        return
     trainer, tok = train_one(s, args, work)
 
     calib_ds = to_ds(s["calib"], tok, args.max_len)
@@ -170,18 +215,8 @@ def main() -> None:
     }
 
     if args.lodo:
-        lodo = {}
-        for held in sorted(s["train"]["dataset"].unique()):
-            sub = {k: v[v["dataset"] != held].reset_index(drop=True) for k, v in s.items() if k != "test"}
-            te = s["test"][s["test"]["dataset"] == held].reset_index(drop=True)
-            if te["label"].nunique() < 2:
-                continue
-            t2, tok2 = train_one(sub, args, work / f"lodo_{held}")
-            p = 1 / (1 + np.exp(-logit_diff(t2, to_ds(te, tok2, args.max_len))))
-            lodo[held] = metrics(te["label"], p, 0.5)
-        summary["leave_one_dataset_out"] = lodo
-        aucs = [m["roc_auc"] for m in lodo.values() if "roc_auc" in m]
-        summary["cross_dataset_auc"] = float(np.mean(aucs)) if aucs else None
+        summary["leave_one_dataset_out"] = lodo = leave_one_dataset_out(s, args, work)
+        summary["cross_dataset_auc"] = mean_auc(lodo)
 
     args.out.mkdir(parents=True, exist_ok=True)
     export_onnx(trainer.model, tok, args.out, args.max_len)
