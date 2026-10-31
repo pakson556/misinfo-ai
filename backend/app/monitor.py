@@ -13,7 +13,11 @@ HOW IT WORKS
      published fact-checks (one every few seconds, to stay inside the free
      quota). If a fact-checker has reviewed a very similar claim, the post shows
      that fact-check, and the claim is counted in "Claims fact-checkers flagged".
-  5. The Live page asks GET /api/monitor every few seconds and shows it.
+  5. Every 15 minutes, GDELT (a free project that reads news from every country
+     in 100+ languages) is asked for news articles from the last hour about
+     false claims, hoaxes, misinformation and fact-checks. These fill the
+     "Misinformation in the news worldwide" list and the by-country counts.
+  6. The Live page asks GET /api/monitor every few seconds and shows it.
 
 PRIVACY (by design)
   Only the post's words are kept: no names, handles, account IDs or links.
@@ -39,6 +43,7 @@ from .llm.heuristic_provider import heuristic_claims, match_factchecks, rating_t
 from .pipeline.retrieval import google_factcheck
 from .pipeline.style import style_signal
 from .pipeline.tactics import detect_tactics
+from .services import http
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +73,12 @@ TOPICS = re.compile(
 # Capitals and "!!!" are common in sport, jokes and excitement, so on their own
 # they never flag a post. At least one other warning sign must be present.
 STYLE_ONLY = {"shouting", "excess_punctuation"}
+# GDELT world news: what to search for, and how often (GDELT asks for at most 1 request per 5 s).
+GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
+GDELT_QUERY = (
+    '("false claim" OR "fake news" OR misinformation OR disinformation OR hoax OR debunked OR "fact check" OR "fact-check")'
+)
+GDELT_EVERY_S = 15 * 60
 LOOKUP_GAP_S = 3.0  # wait between fact-check lookups (about 1,200 an hour at most)
 MATCH_MIN = 0.7  # how closely a fact-checked claim must match the post (0-1)
 
@@ -129,6 +140,10 @@ class Monitor:
         self.looked_up = 0
         self.matched = 0
         self.matched_claims: dict[str, dict] = {}  # fact-check URL -> claim, rating, how often seen
+        # World news about misinformation (from GDELT), newest first, and when it was last fetched.
+        self.news: list[dict] = []
+        self.news_updated: str | None = None
+        self.news_error: str | None = None
 
     def _tick(self, flagged: bool) -> None:
         minute = int(time.time() // 60)
@@ -201,6 +216,12 @@ class Monitor:
             ],
             "per_minute": [{"minute": m * 60, "seen": s, "flagged": f} for m, s, f in self.per_minute],
             "factcheck_enabled": bool(settings.google_factcheck_api_key),
+            "news": self.news[:40],
+            "news_updated": self.news_updated,
+            "news_error": self.news_error,
+            "news_by_country": [
+                {"country": c, "count": n} for c, n in Counter(a["country"] for a in self.news if a["country"]).most_common(12)
+            ],
             "looked_up": self.looked_up,
             "matched": self.matched,
             "matched_claims": sorted(self.matched_claims.values(), key=lambda c: (c["count"], c["last_seen"]), reverse=True)[:10],
@@ -209,6 +230,60 @@ class Monitor:
 
 
 monitor = Monitor()
+
+
+def parse_gdelt(data: dict) -> list[dict]:
+    """Turn GDELT's answer into a tidy list of articles (one per web address), newest first."""
+    out, seen = [], set()
+    for a in (data or {}).get("articles") or []:
+        url = a.get("url") or ""
+        title = (a.get("title") or "").strip()
+        if not url or not title or url in seen:
+            continue
+        seen.add(url)
+        when = a.get("seendate") or ""  # e.g. "20261031T153000Z"
+        try:
+            when = datetime.strptime(when, "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC).isoformat(timespec="seconds")
+        except ValueError:
+            when = None
+        out.append(
+            {
+                "title": title[:220],
+                "url": url,
+                "site": a.get("domain") or "",
+                "country": a.get("sourcecountry") or "",
+                "language": a.get("language") or "",
+                "time": when,
+            }
+        )
+    return sorted(out, key=lambda x: x["time"] or "", reverse=True)
+
+
+async def news_forever() -> None:
+    """Background task: ask GDELT for the last hour of misinformation-related news, every 15 minutes."""
+    while True:
+        try:
+            data = await http.get_json(
+                GDELT_URL,
+                params={
+                    "query": GDELT_QUERY,
+                    "mode": "artlist",
+                    "format": "json",
+                    "maxrecords": 75,
+                    "timespan": "1h",
+                    "sort": "datedesc",
+                },
+                ttl=GDELT_EVERY_S - 60,
+            )
+            monitor.news = parse_gdelt(data)
+            monitor.news_updated = datetime.now(UTC).isoformat(timespec="seconds")
+            monitor.news_error = None
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - GDELT down or busy: show a note, try again later
+            log.warning("GDELT news fetch failed: %r", e)
+            monitor.news_error = "World news couldn't be loaded just now. It will try again in 15 minutes."
+        await asyncio.sleep(GDELT_EVERY_S)
 
 
 async def lookup_forever() -> None:
@@ -228,11 +303,12 @@ async def run_forever() -> None:
     """Background task: read the stream, and reconnect (trying the next server) if it drops."""
     import websockets  # installed with uvicorn[standard]
 
-    worker = asyncio.create_task(lookup_forever())
+    workers = [asyncio.create_task(lookup_forever()), asyncio.create_task(news_forever())]
     try:
         await _read_stream(websockets)
     finally:
-        worker.cancel()
+        for w in workers:
+            w.cancel()
 
 
 async def _read_stream(websockets) -> None:

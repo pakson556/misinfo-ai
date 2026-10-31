@@ -43,7 +43,7 @@ export default function Live() {
         <Status m={m} />
       </div>
       <p className="mt-3 max-w-[62ch] leading-relaxed text-ink-soft">
-        Public posts on Bluesky, read as they are written. Posts that use common misinformation tricks appear below,
+        Public posts on Bluesky, read as they are written, plus news from around the world (further down). Posts that use common misinformation tricks appear below,
         without names, and are looked up in published fact-checks. Being listed doesn't mean a post is false. Press{" "}
         <span className="font-medium text-ink">Check it</span> for a full check.
       </p>
@@ -154,9 +154,66 @@ export default function Live() {
               </p>
             </aside>
           </div>
+
+          <WorldNews m={m} />
         </>
       )}
     </div>
+  );
+}
+
+// News articles from around the world about false claims, hoaxes and fact-checks (from GDELT).
+function WorldNews({ m }) {
+  const maxCountry = Math.max(1, ...(m.news_by_country || []).map((c) => c.count));
+  return (
+    <section className="mt-14 border-t border-rule pt-8">
+      <h2 className="font-serif text-2xl font-[650] text-ink">Misinformation in the news worldwide</h2>
+      <p className="mt-2 max-w-[62ch] text-sm leading-relaxed text-ink-soft">
+        News stories from the last hour, from any country, about false claims, hoaxes and fact-checks. Collected by GDELT,
+        a free project that reads news in over 100 languages. Updated every 15 minutes.
+      </p>
+      {m.news_error && <p className="mt-4 text-sm text-mixed">{m.news_error}</p>}
+      {!m.news?.length ? (
+        !m.news_error && <p className="mt-4 text-sm text-ink-faint">Loading world news…</p>
+      ) : (
+        <div className="mt-6 grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
+          <ul className="min-w-0 divide-y divide-rule rounded-xl border border-rule bg-sheet">
+            {m.news.map((a) => (
+              <li key={a.url}>
+                <a href={a.url} target="_blank" rel="noopener noreferrer" className="group block px-4 py-3">
+                  <span className="flex items-start gap-1.5 text-[0.95rem] leading-snug text-ink group-hover:text-cobalt">
+                    {a.title}
+                    <ExternalLink size={13} className="mt-1 shrink-0 opacity-50" aria-hidden />
+                  </span>
+                  <span className="mt-1 block text-xs text-ink-faint">
+                    {[a.site, a.country, a.language !== "English" ? a.language : "", a.time ? timeAgo(a.time) : ""]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+          <aside>
+            <h3 className="text-sm font-semibold text-ink">Where these stories come from</h3>
+            <ul className="mt-3 space-y-3">
+              {m.news_by_country.map((c) => (
+                <li key={c.country}>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-ink">{c.country}</span>
+                    <span className="tabular-nums text-ink-faint">{c.count}</span>
+                  </div>
+                  <div className="mt-1 h-1.5 rounded-full bg-rule">
+                    <div className="h-full rounded-full bg-cobalt" style={{ width: `${(c.count / maxCountry) * 100}%` }} />
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {m.news_updated && <p className="mt-6 text-xs text-ink-faint">Last updated {timeAgo(m.news_updated)}.</p>}
+          </aside>
+        </div>
+      )}
+    </section>
   );
 }
 

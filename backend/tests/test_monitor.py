@@ -99,3 +99,32 @@ async def test_lookup_attaches_close_factcheck_only(monkeypatch):
     other = {"text": "The council approved the new budget for road repairs across the whole county this week.", "factcheck": None}
     await m.lookup(other)
     assert other["factcheck"] is None and m.matched == 1
+
+
+def test_parse_gdelt_tidies_and_dedupes():
+    from app.monitor import parse_gdelt
+
+    data = {
+        "articles": [
+            {
+                "url": "https://a.com/1",
+                "title": "Viral hoax debunked",
+                "seendate": "20261031T150000Z",
+                "domain": "a.com",
+                "sourcecountry": "Ghana",
+            },
+            {"url": "https://a.com/1", "title": "duplicate", "seendate": "20261031T150000Z"},
+            {
+                "url": "https://b.com/2",
+                "title": "Fact check: no, the photo is fake",
+                "seendate": "20261031T153000Z",
+                "domain": "b.com",
+                "sourcecountry": "United Kingdom",
+            },
+            {"url": "", "title": "no url"},
+        ]
+    }
+    out = parse_gdelt(data)
+    assert [a["url"] for a in out] == ["https://b.com/2", "https://a.com/1"]  # newest first, no duplicate
+    assert out[1]["country"] == "Ghana" and out[0]["time"].startswith("2026-10-31T15:30")
+    assert parse_gdelt({}) == []
