@@ -91,6 +91,7 @@ class StyleSignal(BaseModel):
     available: bool = False
     model: str = ""
     probability: float | None = None  # how much the text resembles misinformation in the training data
+    reliability: float = 0.0  # 0-1, from the model's cross-dataset AUC; scales how much it may move the score
     note: str = ""
 
 

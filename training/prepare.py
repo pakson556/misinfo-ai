@@ -110,30 +110,42 @@ def dedupe(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
 
 
 def group_split(df: pd.DataFrame, seed: int, fracs=(0.7, 0.1, 0.05, 0.15)) -> pd.Series:
-    """Assign train/val/calib/test by group, stratified per dataset."""
+    """
+    Assign train/val/calib/test so that every group lands in exactly ONE split.
+
+    Groups can span datasets (a near-duplicate found in two datasets) or span a
+    dataset's official splits (the same LIAR claim in train.tsv and test.tsv).
+    So the split is decided per group, once:
+      1. Groups touching an official split take the most held-out one
+         (test > val > train), so a test claim never has a twin in training.
+         A third of the official-val groups become calib.
+      2. Remaining groups are shuffled and cut by `fracs`, per dataset, so each
+         dataset is represented in every split.
+    """
     rng = np.random.default_rng(seed)
     names = ["train", "val", "calib", "test"]
-    out = pd.Series(index=df.index, dtype=object)
+    rank = {"train": 0, "val": 1, "test": 2}
+    assign: dict = {}
+
+    official = df[df["split"].isin(rank)]
+    if len(official):
+        best = official.groupby("group")["split"].agg(lambda s: max(s, key=rank.get))
+        assign.update(best.to_dict())
+        val_groups = np.array(sorted(g for g, sp in assign.items() if sp == "val"), dtype=object)
+        rng.shuffle(val_groups)
+        for g in val_groups[: len(val_groups) // 3]:
+            assign[g] = "calib"
+
     for _, part in df.groupby("dataset"):
-        official = part["split"].isin(["train", "val", "test"])
-        if official.all():
-            s = part["split"].copy()
-            # carve calib out of the official validation set
-            val_groups = np.array(part.loc[s == "val", "group"].unique(), dtype=object)
-            rng.shuffle(val_groups)
-            calib = set(val_groups[: len(val_groups) // 3])
-            s[(s == "val") & part["group"].isin(calib)] = "calib"
-            out.loc[part.index] = s
+        groups = np.array([g for g in part["group"].unique() if g not in assign], dtype=object)
+        if not len(groups):
             continue
-        groups = np.array(part["group"].unique(), dtype=object)
         rng.shuffle(groups)
         cuts = np.cumsum([int(round(f * len(groups))) for f in fracs])[:-1]
-        assign = {}
         for name, chunk in zip(names, np.split(groups, cuts), strict=True):
             for g in chunk:
                 assign[g] = name
-        out.loc[part.index] = part["group"].map(assign)
-    return out
+    return df["group"].map(assign)
 
 
 def main() -> None:

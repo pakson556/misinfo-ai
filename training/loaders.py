@@ -153,6 +153,12 @@ def load_pheme(raw: Path, include_non_rumours: bool = True) -> pd.DataFrame:
                         continue  # unverified rumour
                 # group by event: all tweets about one breaking event share topic words
                 rows.append({"text": _tweet_text(src), "label": y, "dataset": "pheme", "group": f"pheme:{ev}", "split": ""})
+    # The 5-event PHEME release has rumour/non-rumour folders but no veracity
+    # annotation.json files. Then only non-rumours (label 0) survive, and the model
+    # would learn "PHEME-style tweet = real". Skip the dataset instead.
+    if rows and not any(r["label"] == 1 for r in rows):
+        print("pheme: no veracity annotations found (need the 9-event 'all-rnr-annotated-threads' release); skipped")
+        return _frame([])
     return _frame(rows)
 
 

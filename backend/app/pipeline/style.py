@@ -116,6 +116,12 @@ def style_signal(text: str) -> StyleSignal:
     p = model.predict(text[:5000])
     auc = (meta.get("metrics") or {}).get("cross_dataset_auc")
     note = "Similarity to the writing style of misinformation in the training data. A weak signal: it doesn't check facts."
+    # Reliability: 0 at AUC 0.5 (coin flip on unseen sources), 1 at AUC 0.8 or better.
+    # A model that hasn't shown it generalises gets little say.
+    reliability = 0.0
     if auc:
         note += f" Cross-dataset AUC: {auc:.2f}."
-    return StyleSignal(available=True, model=meta.get("name", ""), probability=round(p, 3), note=note)
+        reliability = max(0.0, min(1.0, (auc - 0.5) / 0.3))
+    return StyleSignal(
+        available=True, model=meta.get("name", ""), probability=round(p, 3), reliability=round(reliability, 2), note=note
+    )

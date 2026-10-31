@@ -33,12 +33,13 @@ def _prior(tactics_score: float, style: StyleSignal) -> float:
     The starting guess, used only where evidence is missing.
 
     Starts at 0.2, rises with persuasion tactics (up to +0.4), and moves a little
-    with the style model if one is installed. Always kept between 0.03 and 0.85
+    with the style model if one is installed: at most +/-0.125, scaled down by the
+    model's reliability (how well it did on datasets it never saw). Always kept between 0.03 and 0.85
     so wording alone can't push it to the extremes.
     """
     p = 0.2 + 0.4 * tactics_score
     if style.available and style.probability is not None:
-        p += 0.25 * (style.probability - 0.5)
+        p += 0.25 * style.reliability * (style.probability - 0.5)
     return max(0.03, min(0.85, p))
 
 

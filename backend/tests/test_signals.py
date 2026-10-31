@@ -133,3 +133,12 @@ def test_source_classification():
     assert classify("https://pubmed.ncbi.nlm.nih.gov/123")[0] in {"science", "government"}
     assert classify("https://www.infowars.com/x")[1] < 0.2
     assert classify("https://evil-reuters.com.example.net/x")[0] == "web"
+
+
+def test_unreliable_style_model_barely_moves_score():
+    # A style model that is no better than a coin flip on unseen datasets gets no say.
+    base = aggregate([_cr("UNVERIFIABLE", 0.1)], 0.0, StyleSignal())[1]
+    coin = aggregate([_cr("UNVERIFIABLE", 0.1)], 0.0, StyleSignal(available=True, probability=0.99, reliability=0.0))[1]
+    good = aggregate([_cr("UNVERIFIABLE", 0.1)], 0.0, StyleSignal(available=True, probability=0.99, reliability=1.0))[1]
+    assert coin == base
+    assert good > base

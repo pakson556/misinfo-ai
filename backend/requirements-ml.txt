@@ -2,5 +2,5 @@
 onnxruntime>=1.18
 tokenizers>=0.19
 numpy>=1.26
-scikit-learn>=1.5
+scikit-learn==1.9.1  # must match the version the style model was trained with (joblib files are version-specific)
 joblib>=1.4
