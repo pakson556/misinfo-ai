@@ -169,7 +169,7 @@ function WorldNews({ m }) {
     <section className="mt-14 border-t border-rule pt-8">
       <h2 className="font-serif text-2xl font-[650] text-ink">Misinformation in the news worldwide</h2>
       <p className="mt-2 max-w-[62ch] text-sm leading-relaxed text-ink-soft">
-        News stories from the last hour, from any country, about false claims, hoaxes and fact-checks. Collected by GDELT,
+        News stories from the last 24 hours, from any country, about false claims, hoaxes and fact-checks. Collected by GDELT,
         a free project that reads news in over 100 languages. Updated every 15 minutes.
       </p>
       {m.news_error && <p className="mt-4 text-sm text-mixed">{m.news_error}</p>}

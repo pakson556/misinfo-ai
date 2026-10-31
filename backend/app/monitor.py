@@ -14,7 +14,7 @@ HOW IT WORKS
      quota). If a fact-checker has reviewed a very similar claim, the post shows
      that fact-check, and the claim is counted in "Claims fact-checkers flagged".
   5. Every 15 minutes, GDELT (a free project that reads news from every country
-     in 100+ languages) is asked for news articles from the last hour about
+     in 100+ languages) is asked for news articles from the last 24 hours about
      false claims, hoaxes, misinformation and fact-checks. These fill the
      "Misinformation in the news worldwide" list and the by-country counts.
   6. The Live page asks GET /api/monitor every few seconds and shows it.
@@ -260,7 +260,7 @@ def parse_gdelt(data: dict) -> list[dict]:
 
 
 async def news_forever() -> None:
-    """Background task: ask GDELT for the last hour of misinformation-related news, every 15 minutes."""
+    """Background task: ask GDELT for the last 24 hours of misinformation-related news, every 15 minutes."""
     while True:
         retry_in = GDELT_EVERY_S
         try:
@@ -272,7 +272,7 @@ async def news_forever() -> None:
                     "mode": "artlist",
                     "format": "json",
                     "maxrecords": 75,
-                    "timespan": "1h",
+                    "timespan": "24h",
                     "sort": "datedesc",
                 },
                 timeout=45,
