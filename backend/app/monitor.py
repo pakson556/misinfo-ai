@@ -75,9 +75,7 @@ TOPICS = re.compile(
 STYLE_ONLY = {"shouting", "excess_punctuation"}
 # GDELT world news: what to search for, and how often (GDELT asks for at most 1 request per 5 s).
 GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
-GDELT_QUERY = (
-    '("false claim" OR "fake news" OR misinformation OR disinformation OR hoax OR debunked OR "fact check" OR "fact-check")'
-)
+GDELT_QUERY = '("false claim" OR "fake news" OR misinformation OR disinformation OR hoax OR debunked OR "fact check")'
 GDELT_EVERY_S = 15 * 60
 LOOKUP_GAP_S = 3.0  # wait between fact-check lookups (about 1,200 an hour at most)
 MATCH_MIN = 0.7  # how closely a fact-checked claim must match the post (0-1)
@@ -144,6 +142,7 @@ class Monitor:
         self.news: list[dict] = []
         self.news_updated: str | None = None
         self.news_error: str | None = None
+        self.news_error_detail: str | None = None  # technical reason, for fixing problems
 
     def _tick(self, flagged: bool) -> None:
         minute = int(time.time() // 60)
@@ -219,6 +218,7 @@ class Monitor:
             "news": self.news[:40],
             "news_updated": self.news_updated,
             "news_error": self.news_error,
+            "news_error_detail": self.news_error_detail,
             "news_by_country": [
                 {"country": c, "count": n} for c, n in Counter(a["country"] for a in self.news if a["country"]).most_common(12)
             ],
@@ -262,8 +262,10 @@ def parse_gdelt(data: dict) -> list[dict]:
 async def news_forever() -> None:
     """Background task: ask GDELT for the last hour of misinformation-related news, every 15 minutes."""
     while True:
+        retry_in = GDELT_EVERY_S
         try:
-            data = await http.get_json(
+            # GDELT searches a lot of news, so it can take a while: allow 45 s (normal lookups get 8 s).
+            r = await http.client().get(
                 GDELT_URL,
                 params={
                     "query": GDELT_QUERY,
@@ -273,17 +275,25 @@ async def news_forever() -> None:
                     "timespan": "1h",
                     "sort": "datedesc",
                 },
-                ttl=GDELT_EVERY_S - 60,
+                timeout=45,
             )
+            r.raise_for_status()
+            try:
+                data = r.json()
+            except ValueError:
+                # GDELT explains problems (bad query, too many requests) as plain text instead of JSON.
+                raise RuntimeError(f"GDELT replied: {r.text[:200]}") from None
             monitor.news = parse_gdelt(data)
             monitor.news_updated = datetime.now(UTC).isoformat(timespec="seconds")
-            monitor.news_error = None
+            monitor.news_error = monitor.news_error_detail = None
         except asyncio.CancelledError:
             raise
-        except Exception as e:  # noqa: BLE001 - GDELT down or busy: show a note, try again later
+        except Exception as e:  # noqa: BLE001 - GDELT down or busy: show a note, try again soon
             log.warning("GDELT news fetch failed: %r", e)
-            monitor.news_error = "World news couldn't be loaded just now. It will try again in 15 minutes."
-        await asyncio.sleep(GDELT_EVERY_S)
+            monitor.news_error = "World news couldn't be loaded just now. It will try again in a few minutes."
+            monitor.news_error_detail = repr(e)[:300]
+            retry_in = 3 * 60
+        await asyncio.sleep(retry_in)
 
 
 async def lookup_forever() -> None:
