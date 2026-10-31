@@ -5,11 +5,11 @@
  * No names or accounts are shown. Being listed is not a verdict: each post has a
  * "Check it" button that sends its text to the Check page for a proper fact-check.
  */
-import { Radio } from "lucide-react";
+import { ExternalLink, Radio } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api.js";
-import { timeAgo } from "../lib/verdicts.js";
+import { CLAIM, timeAgo } from "../lib/verdicts.js";
 
 const fmt = new Intl.NumberFormat();
 
@@ -44,7 +44,8 @@ export default function Live() {
       </div>
       <p className="mt-3 max-w-[62ch] leading-relaxed text-ink-soft">
         Public posts on Bluesky, read as they are written. Posts that use common misinformation tricks appear below,
-        without names. Being listed doesn't mean a post is false. Press <span className="font-medium text-ink">Check it</span> to look up the facts.
+        without names, and are looked up in published fact-checks. Being listed doesn't mean a post is false. Press{" "}
+        <span className="font-medium text-ink">Check it</span> for a full check.
       </p>
 
       {error && <p className="mt-6 text-sm text-refuted">{error}</p>}
@@ -61,10 +62,15 @@ export default function Live() {
 
       {m?.enabled && (
         <>
-          <section className="mt-8 grid gap-4 sm:grid-cols-3">
+          <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Tile label="Posts read" value={fmt.format(m.seen)} />
             <Tile label="Posts with warning signs" value={fmt.format(m.flagged)} />
             <Tile label="Share with warning signs" value={m.seen ? `${(share * 100).toFixed(1)}%` : "–"} />
+            <Tile
+              label="Matched a published fact-check"
+              value={m.factcheck_enabled ? fmt.format(m.matched) : "Off"}
+              note={m.factcheck_enabled ? `${fmt.format(m.looked_up)} looked up so far` : "Needs the Google Fact Check key"}
+            />
           </section>
 
           <div className="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_18rem]">
@@ -79,6 +85,7 @@ export default function Live() {
                   {m.recent.map((p) => (
                     <li key={p.time + p.text} className="rounded-xl border border-rule bg-sheet p-4">
                       <p className="font-serif text-[1.02rem] leading-relaxed text-ink">{p.text}</p>
+                      {p.factcheck && <FactCheck fc={p.factcheck} />}
                       <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                         <span className="flex flex-wrap gap-1.5">
                           {p.tactics.map((t) => (
@@ -105,6 +112,25 @@ export default function Live() {
             </section>
 
             <aside>
+              {m.matched_claims?.length > 0 && (
+                <div className="mb-8">
+                  <h2 className="text-sm font-semibold text-ink">Claims fact-checkers have rated</h2>
+                  <p className="mt-1 text-xs leading-relaxed text-ink-faint">Seen in posts since start-up, most often first.</p>
+                  <ul className="mt-3 space-y-3">
+                    {m.matched_claims.map((c) => (
+                      <li key={c.url} className="text-sm">
+                        <a href={c.url} target="_blank" rel="noopener noreferrer" className="group block">
+                          <span className="text-ink group-hover:text-cobalt">{c.claim}</span>
+                          <span className="mt-0.5 block text-xs text-ink-faint">
+                            <span className={`font-medium ${(CLAIM[c.verdict] || CLAIM.UNVERIFIABLE).text}`}>“{c.rating}”</span> ·{" "}
+                            {c.publisher} · seen {c.count === 1 ? "once" : `${c.count} times`}
+                          </span>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <h2 className="text-sm font-semibold text-ink">Most common warning signs</h2>
               {m.top_tactics.length === 0 ? (
                 <p className="mt-3 text-sm text-ink-faint">None yet.</p>
@@ -134,12 +160,32 @@ export default function Live() {
   );
 }
 
-function Tile({ label, value }) {
+function Tile({ label, value, note }) {
   return (
     <div className="rounded-xl border border-rule bg-sheet p-5">
       <p className="text-sm text-ink-soft">{label}</p>
       <p className="mt-1 font-serif text-3xl tabular-nums text-ink">{value}</p>
+      {note && <p className="mt-1 text-xs text-ink-faint">{note}</p>}
     </div>
+  );
+}
+
+// A published fact-check about a claim very close to this post.
+function FactCheck({ fc }) {
+  const tone = CLAIM[fc.verdict] || CLAIM.UNVERIFIABLE;
+  return (
+    <a
+      href={fc.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`mt-3 flex items-start gap-2 rounded-lg px-3 py-2 text-sm ${tone.bg} hover:underline`}
+    >
+      <span>
+        A fact-checker reviewed a very similar claim. <span className="font-medium">{fc.publisher}</span> rated it{" "}
+        <span className={`font-semibold ${tone.text}`}>“{fc.rating}”</span>.
+      </span>
+      <ExternalLink size={14} className="mt-1 shrink-0 opacity-60" aria-hidden />
+    </a>
   );
 }
 

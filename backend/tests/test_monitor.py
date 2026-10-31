@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 from app.monitor import Monitor, anonymise, extract_post
 
 LONG = "BREAKING!!! Doctors don't want you to know this simple trick that cures cancer. Share this before they delete it!"
@@ -48,3 +49,41 @@ def test_monitor_flags_warning_signs_but_not_plain_posts():
     assert snap["seen"] == 3 and snap["flagged"] == 1
     assert snap["recent"][0]["tactics"] and "did:" not in json.dumps(snap)
     assert snap["top_tactics"][0]["count"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_lookup_attaches_close_factcheck_only(monkeypatch):
+    from app import monitor as mon
+    from app.schemas import Evidence
+
+    async def fake_factcheck(text):
+        return [
+            Evidence(
+                title="Fact-check",
+                url="https://fullfact.org/x",
+                domain="fullfact.org",
+                snippet="Doctors don't want you to know this simple trick that cures cancer",
+                kind="factcheck",
+                publisher="Full Fact",
+                rating="False",
+            ),
+            Evidence(
+                title="Other",
+                url="https://x.org/y",
+                domain="x.org",
+                snippet="The moon is made of cheese",
+                kind="factcheck",
+                rating="False",
+            ),
+        ]
+
+    monkeypatch.setattr(mon, "google_factcheck", fake_factcheck)
+    m = Monitor()
+    item = {"text": LONG, "factcheck": None}
+    await m.lookup(item)
+    assert item["factcheck"]["publisher"] == "Full Fact" and item["factcheck"]["verdict"] == "REFUTED"
+    assert m.snapshot()["matched_claims"][0]["count"] == 1
+
+    other = {"text": "The council approved the new budget for road repairs across the whole county this week.", "factcheck": None}
+    await m.lookup(other)
+    assert other["factcheck"] is None and m.matched == 1

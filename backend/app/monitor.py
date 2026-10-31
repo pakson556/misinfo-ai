@@ -9,7 +9,11 @@ HOW IT WORKS
      detector the Check page uses (tactics.py), plus the style model if installed.
   3. Posts with strong warning signs go into a short "recently flagged" list.
      Counters track how many posts were read and which tricks appear most.
-  4. The Live page asks GET /api/monitor every few seconds and shows it.
+  4. In the background, flagged posts are looked up in Google's database of
+     published fact-checks (one every few seconds, to stay inside the free
+     quota). If a fact-checker has reviewed a very similar claim, the post shows
+     that fact-check, and the claim is counted in "Claims fact-checkers flagged".
+  5. The Live page asks GET /api/monitor every few seconds and shows it.
 
 PRIVACY (by design)
   Only the post's words are kept: no names, handles, account IDs or links.
@@ -31,6 +35,8 @@ from collections import Counter, deque
 from datetime import UTC, datetime
 
 from .config import get_settings
+from .llm.heuristic_provider import match_factchecks, rating_to_verdict
+from .pipeline.retrieval import google_factcheck
 from .pipeline.style import style_signal
 from .pipeline.tactics import detect_tactics
 
@@ -51,6 +57,8 @@ STRONG_TACTICS = {"miracle_health", "conspiracy", "virality_call"}
 # Capitals and "!!!" are common in sport, jokes and excitement, so on their own
 # they never flag a post. At least one other warning sign must be present.
 STYLE_ONLY = {"shouting", "excess_punctuation"}
+LOOKUP_GAP_S = 3.0  # wait between fact-check lookups (about 1,200 an hour at most)
+MATCH_MIN = 0.7  # how closely a fact-checked claim must match the post (0-1)
 
 _MENTION = re.compile(r"@[\w.\-]+")
 _URL = re.compile(r"https?://\S+|\b\w+\.(?:com|org|net|co|uk|io|ly|me|news)/\S*", re.I)
@@ -99,6 +107,11 @@ class Monitor:
         self.tactic_names: dict[str, str] = {}
         self.recent: deque[dict] = deque(maxlen=KEEP_RECENT)
         self.per_minute: deque[list] = deque(maxlen=60)  # [minute, posts read, posts flagged]
+        # Fact-check lookups: a short waiting line of flagged posts, and what was found.
+        self.queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=10)
+        self.looked_up = 0
+        self.matched = 0
+        self.matched_claims: dict[str, dict] = {}  # fact-check URL -> claim, rating, how often seen
 
     def _tick(self, flagged: bool) -> None:
         minute = int(time.time() // 60)
@@ -121,16 +134,39 @@ class Monitor:
             self.tactic_counts[t.id] += 1
             self.tactic_names[t.id] = t.name
         style = style_signal(text)
-        self.recent.appendleft(
-            {
-                "text": anonymise(text),
-                "tactics": [t.name for t in tactics],
-                "strength": round(score, 2),
-                "style": style.probability if style.available else None,
-                "time": datetime.now(UTC).isoformat(timespec="seconds"),
-            }
-        )
+        item = {
+            "text": anonymise(text),
+            "tactics": [t.name for t in tactics],
+            "strength": round(score, 2),
+            "style": style.probability if style.available else None,
+            "time": datetime.now(UTC).isoformat(timespec="seconds"),
+            "factcheck": None,
+        }
+        self.recent.appendleft(item)
+        if get_settings().google_factcheck_api_key and not self.queue.full():
+            self.queue.put_nowait(item)  # the lookup fills item["factcheck"] in later
         return True
+
+    async def lookup(self, item: dict) -> None:
+        """Look one flagged post up in published fact-checks and attach the best close match."""
+        self.looked_up += 1
+        evidence = await google_factcheck(item["text"])
+        matches = [m for m in match_factchecks(item["text"], evidence) if m[2] >= MATCH_MIN]
+        if not matches:
+            return
+        _, e, sim = matches[0]
+        fc = {
+            "claim": e.snippet or e.title,
+            "publisher": e.publisher or e.domain,
+            "rating": e.rating,
+            "verdict": rating_to_verdict(e.rating or ""),
+            "url": e.url,
+        }
+        item["factcheck"] = fc
+        self.matched += 1
+        seen = self.matched_claims.setdefault(e.url, {**fc, "count": 0})
+        seen["count"] += 1
+        seen["last_seen"] = datetime.now(UTC).isoformat(timespec="seconds")
 
     def snapshot(self) -> dict:
         settings = get_settings()
@@ -145,6 +181,10 @@ class Monitor:
                 {"id": k, "name": self.tactic_names.get(k, k), "count": v} for k, v in self.tactic_counts.most_common(8)
             ],
             "per_minute": [{"minute": m * 60, "seen": s, "flagged": f} for m, s, f in self.per_minute],
+            "factcheck_enabled": bool(settings.google_factcheck_api_key),
+            "looked_up": self.looked_up,
+            "matched": self.matched,
+            "matched_claims": sorted(self.matched_claims.values(), key=lambda c: (c["count"], c["last_seen"]), reverse=True)[:10],
             "recent": list(self.recent),
         }
 
@@ -152,10 +192,31 @@ class Monitor:
 monitor = Monitor()
 
 
+async def lookup_forever() -> None:
+    """Background task: take flagged posts from the waiting line and look them up, one at a time."""
+    while True:
+        item = await monitor.queue.get()
+        try:
+            await monitor.lookup(item)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - a failed lookup just means no match shown
+            log.warning("Fact-check lookup failed: %r", e)
+        await asyncio.sleep(LOOKUP_GAP_S)
+
+
 async def run_forever() -> None:
     """Background task: read the stream, and reconnect (trying the next server) if it drops."""
     import websockets  # installed with uvicorn[standard]
 
+    worker = asyncio.create_task(lookup_forever())
+    try:
+        await _read_stream(websockets)
+    finally:
+        worker.cancel()
+
+
+async def _read_stream(websockets) -> None:
     attempt = 0
     while True:
         url = STREAM_URLS[attempt % len(STREAM_URLS)]
