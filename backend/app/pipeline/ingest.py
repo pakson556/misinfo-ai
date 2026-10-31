@@ -63,15 +63,15 @@ def _assert_public_url(url: str) -> None:
     """
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise IngestError("Only public http(s) links can be analysed.")
+        raise IngestError("Please use a normal web link that starts with http:// or https://.")
     try:
         infos = socket.getaddrinfo(parsed.hostname, None)
     except socket.gaierror as e:
-        raise IngestError("That link's website could not be found.") from e
+        raise IngestError("We couldn't find that website. Check the link is typed correctly.") from e
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-            raise IngestError("That link points to a private network address.")
+            raise IngestError("That link points to a private network, so we can't open it.")
 
 
 async def fetch_article(url: str) -> Article:
@@ -84,18 +84,18 @@ async def fetch_article(url: str) -> Article:
         r = await http.client().get(url)
         r.raise_for_status()
     except Exception as e:  # noqa: BLE001 - surface any network problem as user error
-        raise IngestError(f"Could not open the link ({type(e).__name__}).") from e
+        raise IngestError("We couldn't open that link. The website may be down or blocking us.") from e
 
     html = r.text
     extracted = await asyncio.to_thread(
         trafilatura.bare_extraction, html, url=str(r.url), include_comments=False, favor_precision=True
     )
     if not extracted:
-        raise IngestError("Couldn't find readable article text at that link.")
+        raise IngestError("We couldn't find any article text at that link. Try copying and pasting the text instead.")
     doc = extracted if isinstance(extracted, dict) else extracted.as_dict()
     text = (doc.get("text") or "").strip()
     if len(text) < 40:
-        raise IngestError("The page has too little text to analyse.")
+        raise IngestError("That page has too little text to check. Try copying and pasting the text instead.")
     s = get_settings()
     return Article(
         text=text[: s.max_input_chars],
@@ -127,7 +127,7 @@ def _ocr_sync(raw: bytes) -> str:
         img = Image.open(BytesIO(raw))
         img.load()
     except Exception as e:  # noqa: BLE001
-        raise IngestError("That file isn't a readable image.") from e
+        raise IngestError("That file isn't a picture we can open. Try a PNG or JPG screenshot.") from e
 
     # Rotate phone photos the right way up, then convert to greyscale ("L").
     img = ImageOps.exif_transpose(img).convert("L")
@@ -151,8 +151,8 @@ def _ocr_sync(raw: bytes) -> str:
 async def ocr_image(raw: bytes) -> str:
     """Read the text in an uploaded image, or raise IngestError with a helpful message."""
     if not ocr_available():
-        raise IngestError("Image reading isn't installed on this server (needs Tesseract).")
+        raise IngestError("Reading text from pictures isn't set up on this server yet.")
     text = await asyncio.to_thread(_ocr_sync, raw)
     if len(text) < 10:
-        raise IngestError("No readable text found in the image. Try a sharper screenshot.")
+        raise IngestError("We couldn't read any text in that picture. Try a clearer, larger screenshot.")
     return text

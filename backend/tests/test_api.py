@@ -142,7 +142,7 @@ def test_llm_failure_falls_back_gracefully(client, monkeypatch):
     res = client.post("/api/analyze", json={"text": TEXT}).json()
     assert all(c["verdict"] == "UNVERIFIABLE" for c in res["claims"])
     assert res["overall"] == "UNVERIFIED"
-    assert any("fact-check matching" in w for w in res["pipeline"]["warnings"])
+    assert any("published fact-checks" in w for w in res["pipeline"]["warnings"])
 
 
 @respx.mock
@@ -184,5 +184,5 @@ async def test_google_factcheck_parsing_and_isolated_failures(monkeypatch):
     ev, used, warnings = await gather_evidence("5G spreads coronavirus")
     assert used == ["google_factcheck"]
     assert ev[0].kind == "factcheck" and ev[0].rating == "False" and ev[0].publisher == "Full Fact"
-    assert any("wikipedia" in w for w in warnings)
+    assert any("Wikipedia" in w for w in warnings)
     await http_mod.aclose()

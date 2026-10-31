@@ -115,9 +115,9 @@ async def _check_claim(claim: Claim, context: str, use_web: bool, warnings: list
     method = "llm" if not isinstance(provider, HeuristicProvider) else "factcheck_match"
     try:
         outcome = await provider.verify_claim(claim.text, evidence, context, allow_search=use_web)
-    except Exception as e:  # noqa: BLE001
+    except Exception:  # noqa: BLE001
         log.exception("LLM verification failed")
-        msg = f"AI verification failed for a claim ({type(e).__name__}); used fact-check matching instead."
+        msg = "Our AI couldn't check one of the facts, so we used published fact-checks for it instead."
         if msg not in warnings:
             warnings.append(msg)
         outcome = await HeuristicProvider().verify_claim(claim.text, evidence, context, use_web)
@@ -179,7 +179,7 @@ async def run_analysis(
     yield _ev("input", {"text": text, "input_type": input_type, "source_url": source_url})
 
     # 1) Claims ------------------------------------------------------------
-    yield _ev("stage", {"stage": "claims", "status": "running", "detail": "Finding checkable claims"})
+    yield _ev("stage", {"stage": "claims", "status": "running", "detail": "Finding the facts to check"})
     t0 = time.perf_counter()
     try:
         # Ask the AI to list the checkable claims (gives up after 30 seconds).
@@ -188,7 +188,7 @@ async def run_analysis(
         # AI unavailable -> pick out factual-looking sentences with simple rules instead.
         log.warning("claim extraction failed: %r", e)
         if not isinstance(provider, HeuristicProvider):
-            warnings.append(f"AI claim extraction failed ({type(e).__name__}); used sentence analysis instead.")
+            warnings.append("Our AI couldn't read the text this time, so we checked it sentence by sentence instead.")
         extracted = heuristic_claims(text, s.max_claims)
     claims = [
         Claim(id=i, text=c.text, checkworthiness=c.checkworthiness, span=locate_span(text, c.quote, c.text))
@@ -196,7 +196,10 @@ async def run_analysis(
     ]
     mark("claims", t0)
     yield _ev("claims", {"claims": [c.model_dump(mode="json") for c in claims]})
-    yield _ev("stage", {"stage": "claims", "status": "done", "detail": f"{len(claims)} claim(s) found"})
+    yield _ev(
+        "stage",
+        {"stage": "claims", "status": "done", "detail": f"Found {len(claims)} fact{'s' if len(claims) != 1 else ''} to check"},
+    )
 
     # 2) Language signals (fast, local) ------------------------------------
     t0 = time.perf_counter()
@@ -209,7 +212,7 @@ async def run_analysis(
     # 3) Evidence + verification, claims in parallel -------------------------
     results: dict[int, ClaimResult] = {}
     if claims:
-        detail = "Searching sources and weighing evidence" if use_web else "Checking without web search"
+        detail = "Looking them up in trusted sources" if use_web else "Looking them up (without web search)"
         yield _ev("stage", {"stage": "verify", "status": "running", "detail": detail})
         t0 = time.perf_counter()
         # Start checking every claim at once (each is an asyncio "task" running in parallel).
@@ -224,7 +227,7 @@ async def run_analysis(
                 yield _ev("claim_result", r)
         except TimeoutError:
             # Out of time: stop the unfinished claims and mark them unverifiable.
-            warnings.append("Some claims took too long to check and were marked unverifiable.")
+            warnings.append("Some facts took too long to check, so they're marked \"Can't confirm\".")
             for task, c in tasks.items():
                 if c.id not in results:
                     task.cancel()
@@ -237,14 +240,14 @@ async def run_analysis(
                     results[c.id] = r
                     yield _ev("claim_result", r)
         mark("verify", t0)
-        yield _ev("stage", {"stage": "verify", "status": "done", "detail": "Evidence weighed"})
+        yield _ev("stage", {"stage": "verify", "status": "done", "detail": "Looked them up"})
     else:
-        yield _ev("stage", {"stage": "verify", "status": "skipped", "detail": "No claims to check"})
+        yield _ev("stage", {"stage": "verify", "status": "skipped", "detail": "No facts to check"})
 
     claim_results = [results[c.id] for c in claims]
 
     # 4) Aggregate + summary ------------------------------------------------
-    yield _ev("stage", {"stage": "summary", "status": "running", "detail": "Writing the verdict"})
+    yield _ev("stage", {"stage": "summary", "status": "running", "detail": "Writing the answer"})
     t0 = time.perf_counter()
     # Combine everything into one overall verdict + risk + confidence (the maths is in aggregate.py).
     overall, risk, confidence = aggregate(claim_results, tactics_score, style)
@@ -266,7 +269,7 @@ async def run_analysis(
         except Exception as e:  # noqa: BLE001
             log.info("summary fallback: %r", e)
     if source_url and is_satire(source_url):
-        warnings.append("This link is from a known satire site. It is meant as a joke, not news.")
+        warnings.append("This link is from a joke news website. It isn't meant to be real news.")
     mark("summary", t0)
     timings["total"] = round((time.perf_counter() - started) * 1000, 1)
 

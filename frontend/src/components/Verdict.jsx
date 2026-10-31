@@ -6,9 +6,9 @@ import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import { OVERALL, confidenceWord, pct } from "../lib/verdicts.js";
 
 const STAGES = [
-  { id: "claims", label: "Find claims" },
-  { id: "verify", label: "Check evidence" },
-  { id: "summary", label: "Write verdict" },
+  { id: "claims", label: "Find the facts" },
+  { id: "verify", label: "Look them up" },
+  { id: "summary", label: "Give the answer" },
 ];
 
 export function StageStrip({ stages, done }) {
@@ -52,7 +52,7 @@ function Scale({ label, value, hint, tone }) {
           aria-hidden
         />
       </div>
-      {tone && <div className="mt-1 flex justify-between text-xs text-ink-faint"><span>Reliable</span><span>Misleading</span></div>}
+      {tone && <div className="mt-1 flex justify-between text-xs text-ink-faint"><span>Trustworthy</span><span>Misleading</span></div>}
     </div>
   );
 }
@@ -88,7 +88,7 @@ export function VerdictPanel({ result }) {
       <p className="mt-3 max-w-measure text-[0.98rem] leading-relaxed text-ink-soft">{result.summary}</p>
 
       <div className="mt-6 space-y-4 border-t border-rule pt-5">
-        <Scale label="Risk of being misleading" value={result.risk} hint={pct(result.risk)} tone />
+        <Scale label="How likely this is to mislead" value={result.risk} hint={pct(result.risk)} tone />
         <ConfidenceDots value={result.confidence} />
       </div>
 

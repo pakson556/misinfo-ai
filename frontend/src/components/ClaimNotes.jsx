@@ -24,7 +24,7 @@ function Source({ e }) {
         </span>
         {e.rating && (
           <span className="mt-1 block text-sm text-ink-soft">
-            Rated <span className="font-medium text-ink">“{e.rating}”</span>
+            Their verdict: <span className="font-medium text-ink">“{e.rating}”</span>
           </span>
         )}
       </a>
@@ -53,10 +53,10 @@ function Note({ claim, result, active, onSelect, index }) {
       <span className={`absolute left-0 top-5 bottom-5 w-[3px] rounded-full ${v.bar}`} aria-hidden />
       <div className="flex items-center justify-between gap-3">
         <span className={`text-sm font-semibold ${v.text}`}>
-          {result ? v.label : <span className="shimmer">Checking claim {index + 1}…</span>}
+          {result ? v.label : <span className="shimmer">Checking fact {index + 1}…</span>}
         </span>
         {result && result.verdict !== "UNVERIFIABLE" && (
-          <span className="text-xs text-ink-faint">{pct(result.confidence)} confidence</span>
+          <span className="text-xs text-ink-faint">{pct(result.confidence)} sure</span>
         )}
       </div>
       <button
@@ -83,7 +83,7 @@ function Note({ claim, result, active, onSelect, index }) {
         </>
       )}
       {result && evidence.length === 0 && result.verdict === "UNVERIFIABLE" && (
-        <p className="mt-2 text-sm text-ink-faint">No reliable sources found for this claim.</p>
+        <p className="mt-2 text-sm text-ink-faint">We couldn't find trustworthy sources about this.</p>
       )}
     </li>
   );
@@ -94,7 +94,7 @@ export default function ClaimNotes({ claims, results, activeClaim, onSelect }) {
   return (
     <section>
       <h3 className="text-sm font-semibold text-ink">
-        {claims.length} claim{claims.length > 1 ? "s" : ""} checked
+        {claims.length} fact{claims.length > 1 ? "s" : ""} checked
       </h3>
       <ol className="mt-2">
         {claims.map((c, i) => (

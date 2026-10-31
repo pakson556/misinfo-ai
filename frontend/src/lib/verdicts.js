@@ -6,18 +6,18 @@
 
 export const CLAIM = {
   REFUTED: { label: "False", tone: "refuted", text: "text-refuted", bg: "bg-refuted-wash", bar: "bg-refuted", mark: "mark-refuted" },
-  MIXED: { label: "Needs context", tone: "mixed", text: "text-mixed", bg: "bg-mixed-wash", bar: "bg-mixed", mark: "mark-mixed" },
+  MIXED: { label: "Partly true", tone: "mixed", text: "text-mixed", bg: "bg-mixed-wash", bar: "bg-mixed", mark: "mark-mixed" },
   SUPPORTED: { label: "True", tone: "supported", text: "text-supported", bg: "bg-supported-wash", bar: "bg-supported", mark: "mark-supported" },
-  UNVERIFIABLE: { label: "Unverified", tone: "unverified", text: "text-unverified", bg: "bg-unverified-wash", bar: "bg-unverified", mark: "mark-unverified" },
+  UNVERIFIABLE: { label: "Can't confirm", tone: "unverified", text: "text-unverified", bg: "bg-unverified-wash", bar: "bg-unverified", mark: "mark-unverified" },
   PENDING: { label: "Checking", tone: "pending", text: "text-ink-faint", bg: "bg-paper", bar: "bg-rule", mark: "mark-pending" },
 };
 
 export const OVERALL = {
   LIKELY_FALSE: { label: "Likely false", tone: CLAIM.REFUTED },
-  NEEDS_CONTEXT: { label: "Needs context", tone: CLAIM.MIXED },
-  LOOKS_RELIABLE: { label: "Looks reliable", tone: CLAIM.SUPPORTED },
-  UNVERIFIED: { label: "Unverified", tone: CLAIM.UNVERIFIABLE },
-  NO_CLAIMS: { label: "Nothing to check", tone: CLAIM.UNVERIFIABLE },
+  NEEDS_CONTEXT: { label: "Partly true", tone: CLAIM.MIXED },
+  LOOKS_RELIABLE: { label: "Looks true", tone: CLAIM.SUPPORTED },
+  UNVERIFIED: { label: "Can't confirm", tone: CLAIM.UNVERIFIABLE },
+  NO_CLAIMS: { label: "No facts to check", tone: CLAIM.UNVERIFIABLE },
 };
 
 export const SOURCE_KIND = {
@@ -25,24 +25,28 @@ export const SOURCE_KIND = {
   government: "Official",
   science: "Research",
   news: "News",
-  encyclopedia: "Reference",
+  encyclopedia: "Encyclopedia",
   web: "Web",
 };
 
 export const STANCE = {
-  supports: { label: "Supports", cls: "text-supported" },
-  refutes: { label: "Contradicts", cls: "text-refuted" },
+  supports: { label: "Agrees", cls: "text-supported" },
+  refutes: { label: "Disagrees", cls: "text-refuted" },
   mixed: { label: "Mixed", cls: "text-mixed" },
   neutral: { label: "", cls: "" },
 };
 
+// Friendly names for the evidence sources listed under a result.
+const SOURCE_NAMES = { google_factcheck: "Google Fact Check", wikipedia: "Wikipedia", brave: "web search", tavily: "web search", claude_web_search: "web search" };
+export const sourceName = (s) => SOURCE_NAMES[s] || s.replaceAll("_", " ");
+
 export const pct = (x) => (x == null ? "–" : `${Math.round(x * 100)}%`);
 
 export function confidenceWord(c) {
-  if (c >= 0.75) return "Strong evidence";
-  if (c >= 0.5) return "Moderate evidence";
-  if (c >= 0.25) return "Limited evidence";
-  return "Very little evidence";
+  if (c >= 0.75) return "Very sure";
+  if (c >= 0.5) return "Fairly sure";
+  if (c >= 0.25) return "Not very sure";
+  return "Unsure";
 }
 
 export function timeAgo(iso) {

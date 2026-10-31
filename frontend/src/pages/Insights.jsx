@@ -84,12 +84,12 @@ export default function Insights() {
 
       <div className="mt-10 grid gap-10 md:grid-cols-2">
         <Breakdown title="Overall verdicts" data={s.by_overall} meta={OVERALL} />
-        <Breakdown title="Individual claims" data={s.by_claim_verdict} meta={claimMeta} />
+        <Breakdown title="Individual facts" data={s.by_claim_verdict} meta={claimMeta} />
       </div>
 
       {s.top_tactics.length > 0 && (
         <section className="mt-10">
-          <h2 className="text-sm font-semibold text-ink">Most common persuasion tactics</h2>
+          <h2 className="text-sm font-semibold text-ink">Most common warning signs in the wording</h2>
           <ul className="mt-3 divide-y divide-rule border-y border-rule">
             {s.top_tactics.map((t) => (
               <li key={t.id} className="flex justify-between py-2.5 text-sm">

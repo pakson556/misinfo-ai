@@ -145,7 +145,7 @@ class HeuristicProvider:
             return VerifyOutcome(
                 verdict="UNVERIFIABLE",
                 confidence=0.15,
-                reasoning="No published fact-check closely matches this claim, and no AI reasoning model is configured to weigh other evidence.",
+                reasoning="No fact-checking website has looked at this exact claim yet, and the AI that weighs other evidence isn't switched on.",
             )
         # Several fact-checks may match: each 'votes' for its verdict, weighted by
         # how similar its claim is to ours and how trusted the fact-checker is.
@@ -163,7 +163,7 @@ class HeuristicProvider:
             verdict=verdict,
             confidence=round(conf, 2),
             stances=stances,
-            reasoning=f"{best.publisher or best.domain} reviewed a closely matching claim and rated it “{best.rating}”.",
+            reasoning=f"{best.publisher or best.domain} checked a very similar claim and rated it “{best.rating}”.",
         )
 
     async def summarize(self, payload: str):

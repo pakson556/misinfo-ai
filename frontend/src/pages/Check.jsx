@@ -18,8 +18,8 @@ export default function Check() {
           Check what's true before you share it.
         </h1>
         <p className="mt-4 max-w-[54ch] text-lg leading-relaxed text-ink-soft">
-          Paste a post, a link or a screenshot. We pull out each factual claim, look for evidence from fact-checkers and
-          reliable sources, and show you which parts hold up.
+          Paste a post, a link or a screenshot. We pick out the facts it states, look them up in fact-checks and trusted
+          sources, and show you which parts are true.
         </p>
         <div className="mt-8">
           <InputPanel onSubmit={a.run} busy={false} />
@@ -63,9 +63,9 @@ export default function Check() {
 
 function HowItWorks() {
   const steps = [
-    ["Find the claims", "Separates checkable facts from opinion, jokes and calls to action."],
-    ["Gather evidence", "Searches published fact-checks, reference works and reliable outlets for each claim."],
-    ["Weigh it", "Judges each claim against the evidence and links every source so you can check for yourself."],
+    ["Find the facts", "Picks out statements that can be checked, and skips opinions and jokes."],
+    ["Look them up", "Searches fact-checking websites, encyclopedias and trusted news for each one."],
+    ["Show the answer", "Marks each one true, false or unclear, with links so you can see for yourself."],
   ];
   return (
     <ol className="mt-14 grid gap-8 border-t border-rule pt-8 sm:grid-cols-3">

@@ -93,19 +93,19 @@ def aggregate(claims: list[ClaimResult], tactics_score: float, style: StyleSigna
 
 # Default wording per verdict. The AI can replace HEADLINES with its own summary; GUIDANCE is always used.
 HEADLINES = {
-    "LIKELY_FALSE": "Contains claims that reliable sources contradict",
-    "NEEDS_CONTEXT": "Partly accurate, but missing context or disputed",
-    "LOOKS_RELIABLE": "Key claims are backed by reliable sources",
-    "UNVERIFIED": "Couldn't confirm or rule out the main claims",
-    "NO_CLAIMS": "No checkable factual claims found",
+    "LIKELY_FALSE": "Trusted sources say parts of this are false",
+    "NEEDS_CONTEXT": "Partly true, but it leaves out important details",
+    "LOOKS_RELIABLE": "Trusted sources back up the main points",
+    "UNVERIFIED": "We couldn't confirm or disprove the main points",
+    "NO_CLAIMS": "There are no facts here to check",
 }
 
 GUIDANCE = {
-    "LIKELY_FALSE": "Don't share this as fact. If you want to respond, link the sources below rather than repeating the claim.",
-    "NEEDS_CONTEXT": "Read the details below before sharing, and add the missing context if you do.",
-    "LOOKS_RELIABLE": "The checked claims hold up. It's still worth opening a source or two, especially for fast-moving news.",
-    "UNVERIFIED": "Treat this as unconfirmed. Look for a primary source (official statement, study or original report) before sharing.",
-    "NO_CLAIMS": "This reads as opinion or commentary rather than factual claims, so there's nothing to fact-check. Judge it on its arguments.",
+    "LIKELY_FALSE": "Don't share this as true. If you reply to it, share the sources below instead of repeating the claim.",
+    "NEEDS_CONTEXT": "Read the details below before you share it, and add what's missing if you do.",
+    "LOOKS_RELIABLE": "The facts we checked hold up. It's still worth opening a source or two, especially for breaking news.",
+    "UNVERIFIED": "Treat this as unconfirmed. Before sharing, look for where it first came from, such as an official statement or the original report.",
+    "NO_CLAIMS": "This is opinion, not facts, so there's nothing to fact-check. Decide for yourself whether its arguments make sense.",
 }
 
 
@@ -119,14 +119,14 @@ def default_summary(overall: Overall, claims: list[ClaimResult], tactics: list[T
     if claims:
         bits = []
         if counts["REFUTED"]:
-            bits.append(f"{counts['REFUTED']} contradicted by evidence")
+            bits.append(f"{counts['REFUTED']} false")
         if counts["MIXED"]:
-            bits.append(f"{counts['MIXED']} partly true or missing context")
+            bits.append(f"{counts['MIXED']} partly true")
         if counts["SUPPORTED"]:
-            bits.append(f"{counts['SUPPORTED']} supported")
+            bits.append(f"{counts['SUPPORTED']} true")
         if counts["UNVERIFIABLE"]:
-            bits.append(f"{counts['UNVERIFIABLE']} could not be verified")
-        parts.append(f"We checked {len(claims)} claim{'s' if len(claims) != 1 else ''}: " + ", ".join(bits) + ".")
+            bits.append(f"{counts['UNVERIFIABLE']} we couldn't confirm")
+        parts.append(f"We checked {len(claims)} fact{'s' if len(claims) != 1 else ''}: " + ", ".join(bits) + ".")
         # Quote the first sentence of the reasoning for the worst claim.
         worst = next((c for c in claims if c.verdict == "REFUTED"), None) or next(
             (c for c in claims if c.verdict == "MIXED"), None
@@ -135,5 +135,5 @@ def default_summary(overall: Overall, claims: list[ClaimResult], tactics: list[T
             parts.append(worst.reasoning.split(". ")[0].rstrip(".") + ".")
     if tactics:
         names = ", ".join(t.name.lower() for t in tactics[:3])
-        parts.append(f"The wording also uses persuasion tactics ({names}).")
+        parts.append(f"The wording also uses warning-sign tricks ({names}).")
     return " ".join(parts) or HEADLINES[overall] + "."

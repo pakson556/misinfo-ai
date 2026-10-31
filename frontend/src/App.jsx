@@ -43,12 +43,12 @@ function Header() {
       </div>
       {health && health.status !== "ok" && (
         <p role="status" className="bg-refuted-wash px-4 py-2 text-center text-sm text-refuted">
-          The analysis server isn't responding. Checks won't work until it's running.
+          The checking service isn't running right now, so checks won't work. Please try again in a minute.
         </p>
       )}
       {health?.status === "ok" && !health.llm_ready && (
         <p role="status" className="bg-mixed-wash px-4 py-2 text-center text-sm text-mixed">
-          Running in basic mode: no AI model is configured, so only published fact-checks can be matched.
+          Basic mode: the AI isn't switched on, so we can only match claims that fact-checkers have already checked.
         </p>
       )}
     </header>

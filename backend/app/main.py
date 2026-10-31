@@ -208,7 +208,7 @@ async def analyze_image_stream(request: Request, file: UploadFile = File(...), u
     # Read at most max_upload_mb + 1 byte, so a huge upload can't fill the server's memory.
     raw = await file.read(settings.max_upload_mb * 1024 * 1024 + 1)
     if len(raw) > settings.max_upload_mb * 1024 * 1024:
-        raise HTTPException(413, f"Image is larger than {settings.max_upload_mb} MB.")
+        raise HTTPException(413, f"That picture is too big. Please use one smaller than {settings.max_upload_mb} MB.")
     try:
         text = await ocr_image(raw)
     except IngestError as e:

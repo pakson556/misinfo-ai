@@ -14,7 +14,7 @@ async function request(path, options = {}) {
   try {
     res = await fetch(`${BASE}${path}`, options);
   } catch {
-    throw new Error("Can't reach the analysis server. Check that the backend is running.");
+    throw new Error("We can't reach the checking service right now. Please try again in a minute.");
   }
   if (!res.ok) throw new Error(await errorMessage(res));
   return res;

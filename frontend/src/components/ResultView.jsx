@@ -11,6 +11,7 @@ import AnnotatedText from "./AnnotatedText.jsx";
 import ClaimNotes from "./ClaimNotes.jsx";
 import { StageStrip, VerdictPanel } from "./Verdict.jsx";
 import WritingSignals from "./WritingSignals.jsx";
+import { sourceName } from "../lib/verdicts.js";
 
 export default function ResultView({ a }) {
   const [active, setActive] = useState(null);
@@ -54,7 +55,7 @@ export default function ResultView({ a }) {
               <Link2 size={14} /> {r.source_url}
             </a>
           )}
-          {r?.input_type === "image" && <p className="mb-4 text-sm text-ink-faint">Text read from your screenshot</p>}
+          {r?.input_type === "image" && <p className="mb-4 text-sm text-ink-faint">The text we read from your screenshot</p>}
           {a.text ? (
             <AnnotatedText
               text={a.text}
@@ -68,7 +69,7 @@ export default function ResultView({ a }) {
           ) : (
             <p className="shimmer font-serif text-lg text-ink-faint">Reading the content…</p>
           )}
-          {noSpans && <p className="mt-4 text-xs text-ink-faint">Claims were rephrased from the text, so they're listed on the right rather than highlighted.</p>}
+          {noSpans && <p className="mt-4 text-xs text-ink-faint">We reworded the facts to check them, so they're listed on the right instead of highlighted here.</p>}
         </article>
         <Legend />
       </div>
@@ -97,9 +98,10 @@ export default function ResultView({ a }) {
         )}
         {r && (
           <p className="border-t border-rule pt-4 text-xs leading-relaxed text-ink-faint">
-            Checked with {r.pipeline.llm_model || "rule-based matching"}
-            {r.pipeline.sources_used.length ? ` using ${r.pipeline.sources_used.join(", ").replaceAll("_", " ")}` : ""} in{" "}
-            {(r.pipeline.timings_ms.total / 1000).toFixed(1)}s. Automated checks can be wrong. Open the sources before relying on a verdict.
+            Checked in {(r.pipeline.timings_ms.total / 1000).toFixed(1)} seconds
+            {r.pipeline.sources_used.length ? ` using ${r.pipeline.sources_used.map(sourceName).join(", ")}` : ""}
+            {/claude/i.test(r.pipeline.llm_model || "") ? ", with help from Claude AI" : ""}. Computers can get this wrong, so open
+            the sources before you rely on it.
           </p>
         )}
       </aside>
@@ -123,7 +125,7 @@ function Legend() {
         </span>
       ))}
       <span className="flex items-center gap-1.5">
-        <span className="tactic">wording</span> Persuasion tactic
+        <span className="tactic">wording</span> Warning-sign wording
       </span>
     </div>
   );

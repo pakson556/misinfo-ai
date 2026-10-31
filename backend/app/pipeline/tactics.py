@@ -63,7 +63,7 @@ TACTICS: tuple[TacticDef, ...] = (
     TacticDef(
         "virality_call",
         "Pressure to share",
-        "Asks readers to spread the message before checking it.",
+        "Tells you to pass it on before you've had time to check it.",
         0.8,
         _w(
             "share this",
@@ -89,8 +89,8 @@ TACTICS: tuple[TacticDef, ...] = (
     ),
     TacticDef(
         "urgency",
-        "Artificial urgency",
-        "Creates time pressure that discourages careful thinking.",
+        "Rushing you",
+        "Says you must act right now, so you don't stop and think.",
         0.5,
         _w(
             "breaking",
@@ -108,8 +108,8 @@ TACTICS: tuple[TacticDef, ...] = (
     ),
     TacticDef(
         "conspiracy",
-        "Conspiracy framing",
-        "Suggests hidden powerful groups are concealing the truth.",
+        "Cover-up story",
+        "Claims powerful people are hiding the truth from you.",
         0.9,
         _w(
             "they don't want you to know",
@@ -147,8 +147,8 @@ TACTICS: tuple[TacticDef, ...] = (
     ),
     TacticDef(
         "false_authority",
-        "Vague or false authority",
-        "Leans on unnamed insiders or unverifiable credentials instead of sources.",
+        "Vague experts",
+        'Quotes unnamed "doctors" or "insiders" instead of real sources you can check.',
         0.6,
         _w(
             "insiders say",
@@ -173,8 +173,8 @@ TACTICS: tuple[TacticDef, ...] = (
     ),
     TacticDef(
         "emotional",
-        "Emotionally charged language",
-        "Uses fear, outrage or shock words to trigger a reaction.",
+        "Scary or angry words",
+        "Uses words meant to frighten or anger you, so you react before thinking.",
         0.5,
         _w(
             "shocking",
@@ -211,8 +211,8 @@ TACTICS: tuple[TacticDef, ...] = (
     ),
     TacticDef(
         "absolutes",
-        "Absolute certainty",
-        "Claims total certainty, which real evidence rarely supports.",
+        "Too sure of itself",
+        'Uses words like "always", "100%" or "proven". Real evidence is rarely that certain.',
         0.35,
         _w(
             "100%",
@@ -235,8 +235,8 @@ TACTICS: tuple[TacticDef, ...] = (
     ),
     TacticDef(
         "scapegoating",
-        "Scapegoating",
-        "Blames a whole group for a complex problem.",
+        "Blaming a group",
+        "Blames a whole group of people for a complicated problem.",
         0.7,
         _w(
             "it's all their fault",
@@ -252,15 +252,15 @@ TACTICS: tuple[TacticDef, ...] = (
     ),
     TacticDef(
         "false_dichotomy",
-        "False dilemma",
-        "Presents only two options when more exist.",
+        "Only two choices",
+        "Pretends there are only two options when there are more.",
         0.4,
         _w("either you", "you're either with us", "if you don't", "only two options", "there is no middle", "you can either"),
     ),
     TacticDef(
         "miracle_health",
-        "Miracle health claim",
-        "Promises cures or secret remedies, a hallmark of health misinformation.",
+        "Miracle cure",
+        "Promises a secret or simple cure. A classic sign of false health news.",
         0.8,
         _w(
             "secret cure",
@@ -293,7 +293,7 @@ _COMPILED = [(t, [re.compile(p, re.IGNORECASE) for p in t.patterns]) for t in TA
 # id -> display name, including the two shape-based tactics. Used by the Insights page (db.py).
 TACTIC_NAMES = {t.id: t.name for t in TACTICS} | {
     "shouting": "Shouting (ALL CAPS)",
-    "excess_punctuation": "Excessive punctuation",
+    "excess_punctuation": "Too many !!! or ???",
 }
 
 
@@ -347,7 +347,7 @@ def detect_tactics(text: str) -> tuple[list[Tactic], float]:
             Tactic(
                 id="shouting",
                 name="Shouting (ALL CAPS)",
-                description="Heavy use of capitals to signal alarm or anger.",
+                description="Lots of capital letters to sound alarming.",
                 severity=round(min(0.6, 0.25 + 0.05 * len(caps)), 3),
                 spans=[Span(start=m.start(), end=m.end(), text=m.group(0)) for m in caps[:12]],
             )
@@ -359,8 +359,8 @@ def detect_tactics(text: str) -> tuple[list[Tactic], float]:
         found.append(
             Tactic(
                 id="excess_punctuation",
-                name="Excessive punctuation",
-                description="Repeated !!! or ??? to heighten emotion.",
+                name="Too many !!! or ???",
+                description="Used to make you feel excited or alarmed.",
                 severity=round(min(0.4, 0.15 + 0.05 * len(punct)), 3),
                 spans=[Span(start=m.start(), end=m.end(), text=m.group(0)) for m in punct[:12]],
             )

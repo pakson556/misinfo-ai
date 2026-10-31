@@ -128,7 +128,7 @@ export default function InputPanel({ onSubmit, busy, onCancel }) {
               placeholder="https://"
               className="mt-2 block w-full border-b border-rule bg-transparent pb-2 font-serif text-lg text-ink placeholder:text-ink-faint focus:border-ink focus:outline-none"
             />
-            <p className="mt-2 text-xs text-ink-faint">We read the article's text and check the claims in it.</p>
+            <p className="mt-2 text-xs text-ink-faint">We read the article and check the facts in it.</p>
           </div>
         )}
 
@@ -172,7 +172,7 @@ export default function InputPanel({ onSubmit, busy, onCancel }) {
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule px-4 py-3">
         <label className="flex cursor-pointer items-center gap-2 text-sm text-ink-soft">
           <input type="checkbox" checked={useWeb} onChange={(e) => setUseWeb(e.target.checked)} className="h-4 w-4 accent-cobalt" />
-          Search the web for evidence
+          Also search the wider internet
         </label>
         {busy ? (
           <button type="button" onClick={onCancel} className="inline-flex items-center gap-2 rounded-lg border border-rule px-4 py-2 text-sm font-medium text-ink hover:bg-paper">

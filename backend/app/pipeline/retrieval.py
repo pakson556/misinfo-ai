@@ -45,6 +45,10 @@ some any all every each also only even still such what which who whom whose when
 )
 
 
+# Friendly names for warnings shown to people.
+SOURCE_LABELS = {"google_factcheck": "Google Fact Check", "wikipedia": "Wikipedia", "brave": "Web search", "tavily": "Web search"}
+
+
 def _clean(s: str) -> str:
     """Remove HTML tags and turn entities like &amp; back into normal characters."""
     return html.unescape(_TAG.sub("", s or "")).strip()
@@ -263,7 +267,7 @@ async def gather_evidence(claim: str, max_items: int = 12) -> tuple[list[Evidenc
     for name, res in zip(enabled, results, strict=True):
         if isinstance(res, BaseException):
             log.warning("source %s failed: %r", name, res)
-            warnings.append(f"{name} unavailable ({type(res).__name__})")
+            warnings.append(f"{SOURCE_LABELS.get(name, name)} didn't respond, so we searched fewer sources.")
             continue
         if res:
             used.append(name)
