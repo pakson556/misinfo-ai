@@ -35,7 +35,7 @@ from collections import Counter, deque
 from datetime import UTC, datetime
 
 from .config import get_settings
-from .llm.heuristic_provider import match_factchecks, rating_to_verdict
+from .llm.heuristic_provider import heuristic_claims, match_factchecks, rating_to_verdict
 from .pipeline.retrieval import google_factcheck
 from .pipeline.style import style_signal
 from .pipeline.tactics import detect_tactics
@@ -53,7 +53,18 @@ STREAM_URLS = (
 MIN_CHARS = 60  # shorter posts rarely contain a checkable claim
 FLAG_SCORE = 0.3  # warning-sign strength (0-1) needed to be listed
 KEEP_RECENT = 60  # how many flagged posts the Live page can show
-STRONG_TACTICS = {"miracle_health", "conspiracy", "virality_call"}
+# These signs are strong enough on their own (when the post also states a fact).
+STRONG_TACTICS = {"miracle_health", "conspiracy", "false_authority"}
+# Topics where misinformation is common. Other warning signs only count on these topics,
+# so "please share my drawing!" isn't flagged but "please share: the vaccine causes ..." is.
+TOPICS = re.compile(
+    r"\b(vaccin\w*|jab|covid|virus|pandemic|cancer|cure[sd]?|doctor|hospital|nhs|pharma\w*|medic\w*|health|disease|"
+    r"elect\w*|vot\w*|ballot|government|govt|minister|president|parliament|congress|senat\w*|"
+    r"climate|weather|flood|wildfire|chemtrail\w*|5g|"
+    r"war|army|military|missile|bomb\w*|attack\w*|refugee\w*|migrant\w*|immigra\w*|"
+    r"police|crime|terror\w*|shooting|economy|inflation|tax\w*|bank\w*|crypto\w*|ai)\b",
+    re.I,
+)
 # Capitals and "!!!" are common in sport, jokes and excitement, so on their own
 # they never flag a post. At least one other warning sign must be present.
 STYLE_ONLY = {"shouting", "excess_punctuation"}
@@ -81,10 +92,16 @@ def extract_post(message: str) -> str | None:
         op, coll, record = c.get("operation"), c.get("collection"), c.get("record") or {}
     if op != "create" or coll != "app.bsky.feed.post":
         return None
+    if record.get("reply"):
+        return None  # replies make little sense without the post they answer
     langs = record.get("langs") or []
     if langs and not any(str(lang).lower().startswith("en") for lang in langs):
         return None
     text = record.get("text") or ""
+    # A picture, video or link with only a few words: the meaning is in the attachment,
+    # which this text-only monitor can't see, so skip it.
+    if record.get("embed") and len(text) < 160:
+        return None
     return text if len(text) >= MIN_CHARS else None
 
 
@@ -125,7 +142,9 @@ class Monitor:
         self.seen += 1
         tactics, score = detect_tactics(text)
         content = {t.id for t in tactics} - STYLE_ONLY
-        flagged = bool(content) and (score >= FLAG_SCORE or bool(content & STRONG_TACTICS))
+        flagged = bool(content) and (bool(content & STRONG_TACTICS) or (score >= FLAG_SCORE and bool(TOPICS.search(text))))
+        # Only posts that actually state something checkable (not just feelings, art or jokes).
+        flagged = flagged and bool(heuristic_claims(text, 1))
         self._tick(flagged)
         if not flagged:
             return False

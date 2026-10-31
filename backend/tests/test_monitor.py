@@ -32,6 +32,12 @@ def test_extract_post_handles_both_formats_and_filters():
     assert extract_post(_v1(LONG, op="delete")) is None  # not a new post
     assert extract_post(_v1("too short")) is None
     assert extract_post("not json") is None
+    reply = json.loads(_v1(LONG))
+    reply["commit"]["record"]["reply"] = {"parent": {}}
+    assert extract_post(json.dumps(reply)) is None  # replies skipped
+    pic = json.loads(_v1(LONG))
+    pic["commit"]["record"]["embed"] = {"$type": "app.bsky.embed.images"}
+    assert extract_post(json.dumps(pic)) is None  # short text + picture skipped
 
 
 def test_anonymise_removes_people_and_links():
@@ -45,8 +51,14 @@ def test_monitor_flags_warning_signs_but_not_plain_posts():
     assert m.process(LONG) is True
     assert m.process("The council meeting on Tuesday approved the new budget for road repairs across the county.") is False
     assert m.process("HARD-FOUGHT GOAL!!! WHAT A FINISH from the striker in the 29th minute, the crowd is going wild") is False
+    assert (
+        m.process(
+            "Interestingly enough, all of their drawings ended up looking very similar. They were always amazed by this! Please share!"
+        )
+        is False
+    )
     snap = m.snapshot()
-    assert snap["seen"] == 3 and snap["flagged"] == 1
+    assert snap["seen"] == 4 and snap["flagged"] == 1
     assert snap["recent"][0]["tactics"] and "did:" not in json.dumps(snap)
     assert snap["top_tactics"][0]["count"] >= 1
 
