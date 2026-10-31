@@ -22,3 +22,5 @@ backend/models/style_work/
 
 .DS_Store
 *.log
+backend/models/style_deberta/
+training/.venv/

@@ -128,6 +128,7 @@ def export_onnx(model, tok, out_dir: Path, max_len: int) -> None:
         output_names=["logits"],
         dynamic_axes=dyn,
         opset_version=17,
+        dynamo=False,  # classic exporter: no extra packages needed, works on CPU/CUDA/Apple GPU builds
     )
     tok.save_pretrained(out_dir / "_tok")
     shutil.copy(out_dir / "_tok" / "tokenizer.json", out_dir / "tokenizer.json")
