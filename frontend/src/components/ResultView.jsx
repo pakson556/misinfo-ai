@@ -112,9 +112,9 @@ export default function ResultView({ a }) {
 function Legend() {
   const items = [
     ["mark-refuted", "False"],
-    ["mark-mixed", "Needs context"],
+    ["mark-mixed", "Partly true"],
     ["mark-supported", "True"],
-    ["mark-unverified", "Unverified"],
+    ["mark-unverified", "Can't confirm"],
   ];
   return (
     <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2 text-xs text-ink-soft">
