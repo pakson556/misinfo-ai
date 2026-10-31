@@ -52,6 +52,9 @@ from .services import http
 # the terminal (or in Docker Desktop > Containers > backend > Logs).
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("misinfo")
+# httpx logs every request's full address at INFO level, and some addresses contain
+# API keys (Google Fact Check puts the key in the URL). Only show its warnings.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # All settings (API keys, limits, ...) come from environment variables / backend/.env.
 settings = get_settings()
