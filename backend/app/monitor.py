@@ -48,6 +48,9 @@ MIN_CHARS = 60  # shorter posts rarely contain a checkable claim
 FLAG_SCORE = 0.3  # warning-sign strength (0-1) needed to be listed
 KEEP_RECENT = 60  # how many flagged posts the Live page can show
 STRONG_TACTICS = {"miracle_health", "conspiracy", "virality_call"}
+# Capitals and "!!!" are common in sport, jokes and excitement, so on their own
+# they never flag a post. At least one other warning sign must be present.
+STYLE_ONLY = {"shouting", "excess_punctuation"}
 
 _MENTION = re.compile(r"@[\w.\-]+")
 _URL = re.compile(r"https?://\S+|\b\w+\.(?:com|org|net|co|uk|io|ly|me|news)/\S*", re.I)
@@ -108,8 +111,8 @@ class Monitor:
         """Score one post. Returns True if it was flagged."""
         self.seen += 1
         tactics, score = detect_tactics(text)
-        ids = {t.id for t in tactics}
-        flagged = score >= FLAG_SCORE or bool(ids & STRONG_TACTICS)
+        content = {t.id for t in tactics} - STYLE_ONLY
+        flagged = bool(content) and (score >= FLAG_SCORE or bool(content & STRONG_TACTICS))
         self._tick(flagged)
         if not flagged:
             return False

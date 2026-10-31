@@ -43,7 +43,8 @@ def test_monitor_flags_warning_signs_but_not_plain_posts():
     m = Monitor()
     assert m.process(LONG) is True
     assert m.process("The council meeting on Tuesday approved the new budget for road repairs across the county.") is False
+    assert m.process("HARD-FOUGHT GOAL!!! WHAT A FINISH from the striker in the 29th minute, the crowd is going wild") is False
     snap = m.snapshot()
-    assert snap["seen"] == 2 and snap["flagged"] == 1
+    assert snap["seen"] == 3 and snap["flagged"] == 1
     assert snap["recent"][0]["tactics"] and "did:" not in json.dumps(snap)
     assert snap["top_tactics"][0]["count"] >= 1
