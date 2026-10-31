@@ -117,7 +117,7 @@ async def _check_claim(claim: Claim, context: str, use_web: bool, warnings: list
         outcome = await provider.verify_claim(claim.text, evidence, context, allow_search=use_web)
     except Exception:  # noqa: BLE001
         log.exception("LLM verification failed")
-        msg = "Our AI couldn't check one of the facts, so we used published fact-checks for it instead."
+        msg = "The AI couldn't check one of the facts, so published fact-checks were used for it instead."
         if msg not in warnings:
             warnings.append(msg)
         outcome = await HeuristicProvider().verify_claim(claim.text, evidence, context, use_web)
@@ -188,7 +188,7 @@ async def run_analysis(
         # AI unavailable -> pick out factual-looking sentences with simple rules instead.
         log.warning("claim extraction failed: %r", e)
         if not isinstance(provider, HeuristicProvider):
-            warnings.append("Our AI couldn't read the text this time, so we checked it sentence by sentence instead.")
+            warnings.append("The AI couldn't read the text this time, so it was checked sentence by sentence instead.")
         extracted = heuristic_claims(text, s.max_claims)
     claims = [
         Claim(id=i, text=c.text, checkworthiness=c.checkworthiness, span=locate_span(text, c.quote, c.text))

@@ -96,14 +96,14 @@ HEADLINES = {
     "LIKELY_FALSE": "Trusted sources say parts of this are false",
     "NEEDS_CONTEXT": "Partly true, but it leaves out important details",
     "LOOKS_RELIABLE": "Trusted sources back up the main points",
-    "UNVERIFIED": "We couldn't confirm or disprove the main points",
+    "UNVERIFIED": "The main points couldn't be confirmed or disproved",
     "NO_CLAIMS": "There are no facts here to check",
 }
 
 GUIDANCE = {
     "LIKELY_FALSE": "Don't share this as true. If you reply to it, share the sources below instead of repeating the claim.",
     "NEEDS_CONTEXT": "Read the details below before you share it, and add what's missing if you do.",
-    "LOOKS_RELIABLE": "The facts we checked hold up. It's still worth opening a source or two, especially for breaking news.",
+    "LOOKS_RELIABLE": "The facts checked hold up. It's still worth opening a source or two, especially for breaking news.",
     "UNVERIFIED": "Treat this as unconfirmed. Before sharing, look for where it first came from, such as an official statement or the original report.",
     "NO_CLAIMS": "This is opinion, not facts, so there's nothing to fact-check. Decide for yourself whether its arguments make sense.",
 }
@@ -112,7 +112,7 @@ GUIDANCE = {
 def default_summary(overall: Overall, claims: list[ClaimResult], tactics: list[Tactic]) -> str:
     """
     A plain summary built from the results, used when no AI is available (or it's slow).
-    E.g. "We checked 2 claims: 1 contradicted by evidence, 1 supported. <reason>. The wording also uses ..."
+    E.g. "2 facts checked: 1 false, 1 true. <reason>. The wording also uses ..."
     """
     counts = {v: sum(c.verdict == v for c in claims) for v in ("SUPPORTED", "REFUTED", "MIXED", "UNVERIFIABLE")}
     parts = []
@@ -125,8 +125,8 @@ def default_summary(overall: Overall, claims: list[ClaimResult], tactics: list[T
         if counts["SUPPORTED"]:
             bits.append(f"{counts['SUPPORTED']} true")
         if counts["UNVERIFIABLE"]:
-            bits.append(f"{counts['UNVERIFIABLE']} we couldn't confirm")
-        parts.append(f"We checked {len(claims)} fact{'s' if len(claims) != 1 else ''}: " + ", ".join(bits) + ".")
+            bits.append(f"{counts['UNVERIFIABLE']} can't be confirmed")
+        parts.append(f"{len(claims)} fact{'s' if len(claims) != 1 else ''} checked: " + ", ".join(bits) + ".")
         # Quote the first sentence of the reasoning for the worst claim.
         worst = next((c for c in claims if c.verdict == "REFUTED"), None) or next(
             (c for c in claims if c.verdict == "MIXED"), None

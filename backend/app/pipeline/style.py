@@ -116,7 +116,7 @@ def style_signal(text: str) -> StyleSignal:
     p = model.predict(text[:5000])
     auc = (meta.get("metrics") or {}).get("cross_dataset_auc")
     note = (
-        "Our AI compares how this is written with thousands of posts already known to be true or false. "
+        "The AI compares how this is written with thousands of posts already known to be true or false. "
         "It only looks at the writing, not the facts."
     )
     # Reliability: 0 at AUC 0.5 (coin flip on unseen sources), 1 at AUC 0.8 or better.

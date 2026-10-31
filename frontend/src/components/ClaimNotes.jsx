@@ -83,7 +83,7 @@ function Note({ claim, result, active, onSelect, index }) {
         </>
       )}
       {result && evidence.length === 0 && result.verdict === "UNVERIFIABLE" && (
-        <p className="mt-2 text-sm text-ink-faint">We couldn't find trustworthy sources about this.</p>
+        <p className="mt-2 text-sm text-ink-faint">No trustworthy sources found about this.</p>
       )}
     </li>
   );

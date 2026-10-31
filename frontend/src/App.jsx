@@ -48,7 +48,7 @@ function Header() {
       )}
       {health?.status === "ok" && !health.llm_ready && (
         <p role="status" className="bg-mixed-wash px-4 py-2 text-center text-sm text-mixed">
-          Basic mode: the AI isn't switched on, so we can only match claims that fact-checkers have already checked.
+          Basic mode: the AI isn't switched on, so only claims that fact-checkers have already checked can be matched.
         </p>
       )}
     </header>

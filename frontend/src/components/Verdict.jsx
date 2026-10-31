@@ -1,6 +1,6 @@
 /*
  * The top-right of a result: the progress steps, the overall verdict badge,
- * headline, summary, risk bar, "how sure we are" dots, guidance and warnings.
+ * headline, summary, risk bar, "how sure the check is" dots, guidance and warnings.
  */
 import { AlertTriangle, Check, Loader2 } from "lucide-react";
 import { OVERALL, confidenceWord, pct } from "../lib/verdicts.js";
@@ -61,7 +61,7 @@ function ConfidenceDots({ value }) {
   const filled = Math.round(value * 5);
   return (
     <div className="flex items-baseline justify-between text-sm">
-      <span className="text-ink-soft">How sure we are</span>
+      <span className="text-ink-soft">How sure the check is</span>
       <span className="flex items-center gap-2 font-medium text-ink">
         <span className="flex gap-1" aria-hidden>
           {[0, 1, 2, 3, 4].map((i) => (

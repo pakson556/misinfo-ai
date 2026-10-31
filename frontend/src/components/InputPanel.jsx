@@ -128,7 +128,7 @@ export default function InputPanel({ onSubmit, busy, onCancel }) {
               placeholder="https://"
               className="mt-2 block w-full border-b border-rule bg-transparent pb-2 font-serif text-lg text-ink placeholder:text-ink-faint focus:border-ink focus:outline-none"
             />
-            <p className="mt-2 text-xs text-ink-faint">We read the article and check the facts in it.</p>
+            <p className="mt-2 text-xs text-ink-faint">The article is read and the facts in it are checked.</p>
           </div>
         )}
 

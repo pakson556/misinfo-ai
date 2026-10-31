@@ -18,8 +18,8 @@ export default function Check() {
           Check what's true before you share it.
         </h1>
         <p className="mt-4 max-w-[54ch] text-lg leading-relaxed text-ink-soft">
-          Paste a post, a link or a screenshot. We pick out the facts it states, look them up in fact-checks and trusted
-          sources, and show you which parts are true.
+          Paste a post, a link or a screenshot. MisInfo AI picks out the facts it states, looks them up in fact-checks
+          and trusted sources, and shows you which parts are true.
         </p>
         <div className="mt-8">
           <InputPanel onSubmit={a.run} busy={false} />

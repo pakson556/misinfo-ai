@@ -57,7 +57,7 @@ VERDICT_SCHEMA = {
         "confidence": {"type": "number", "description": "0-1 calibrated confidence in the verdict given the evidence quality."},
         "reasoning": {
             "type": "string",
-            "description": "2-4 plain-English sentences a non-expert can follow, naming the key sources.",
+            "description": "2-4 plain-English sentences a non-expert can follow, naming the key sources. Never use 'we', 'our' or 'I'.",
         },
         "evidence_judgements": {
             "type": "array",
@@ -117,7 +117,8 @@ Guidance:
 
 # Instructions for the final summary.
 SUMMARY_SYSTEM = """Write a short, neutral, plain-English summary of a fact-check for a general audience.
-Do not add facts that are not in the input. Be direct about what is false; be honest when things are unverified."""
+Do not add facts that are not in the input. Be direct about what is false; be honest when things are unverified.
+Write impersonally: never use "we", "our" or "I"."""
 
 
 @dataclass

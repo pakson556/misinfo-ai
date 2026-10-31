@@ -267,7 +267,7 @@ async def gather_evidence(claim: str, max_items: int = 12) -> tuple[list[Evidenc
     for name, res in zip(enabled, results, strict=True):
         if isinstance(res, BaseException):
             log.warning("source %s failed: %r", name, res)
-            warnings.append(f"{SOURCE_LABELS.get(name, name)} didn't respond, so we searched fewer sources.")
+            warnings.append(f"{SOURCE_LABELS.get(name, name)} didn't respond, so fewer sources were searched.")
             continue
         if res:
             used.append(name)

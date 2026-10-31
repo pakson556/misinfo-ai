@@ -67,11 +67,11 @@ def _assert_public_url(url: str) -> None:
     try:
         infos = socket.getaddrinfo(parsed.hostname, None)
     except socket.gaierror as e:
-        raise IngestError("We couldn't find that website. Check the link is typed correctly.") from e
+        raise IngestError("That website couldn't be found. Check the link is typed correctly.") from e
     for info in infos:
         ip = ipaddress.ip_address(info[4][0])
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-            raise IngestError("That link points to a private network, so we can't open it.")
+            raise IngestError("That link points to a private network, so it can't be opened.")
 
 
 async def fetch_article(url: str) -> Article:
@@ -84,14 +84,14 @@ async def fetch_article(url: str) -> Article:
         r = await http.client().get(url)
         r.raise_for_status()
     except Exception as e:  # noqa: BLE001 - surface any network problem as user error
-        raise IngestError("We couldn't open that link. The website may be down or blocking us.") from e
+        raise IngestError("That link couldn't be opened. The website may be down or blocking access.") from e
 
     html = r.text
     extracted = await asyncio.to_thread(
         trafilatura.bare_extraction, html, url=str(r.url), include_comments=False, favor_precision=True
     )
     if not extracted:
-        raise IngestError("We couldn't find any article text at that link. Try copying and pasting the text instead.")
+        raise IngestError("No article text found at that link. Try copying and pasting the text instead.")
     doc = extracted if isinstance(extracted, dict) else extracted.as_dict()
     text = (doc.get("text") or "").strip()
     if len(text) < 40:
@@ -127,7 +127,7 @@ def _ocr_sync(raw: bytes) -> str:
         img = Image.open(BytesIO(raw))
         img.load()
     except Exception as e:  # noqa: BLE001
-        raise IngestError("That file isn't a picture we can open. Try a PNG or JPG screenshot.") from e
+        raise IngestError("That file can't be opened as a picture. Try a PNG or JPG screenshot.") from e
 
     # Rotate phone photos the right way up, then convert to greyscale ("L").
     img = ImageOps.exif_transpose(img).convert("L")
@@ -154,5 +154,5 @@ async def ocr_image(raw: bytes) -> str:
         raise IngestError("Reading text from pictures isn't set up on this server yet.")
     text = await asyncio.to_thread(_ocr_sync, raw)
     if len(text) < 10:
-        raise IngestError("We couldn't read any text in that picture. Try a clearer, larger screenshot.")
+        raise IngestError("No readable text found in that picture. Try a clearer, larger screenshot.")
     return text

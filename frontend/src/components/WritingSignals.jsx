@@ -20,7 +20,7 @@ export default function WritingSignals({ tactics, score, style, showTactics, onT
       <p className="mt-1 text-sm leading-relaxed text-ink-soft">
         {tactics.length
           ? "Tricks often used to make people react or share without thinking. They don't make something false on their own."
-          : "We didn't find any of the usual tricks in the wording."}
+          : "None of the usual tricks found in the wording."}
       </p>
 
       {tactics.length > 0 && (
@@ -72,7 +72,7 @@ function StyleHint({ style }) {
         <span className={`font-medium ${w.cls}`}>{w.label}</span>
       </div>
       <p className="mt-1 text-sm leading-relaxed text-ink-soft">
-        A small hint from our AI about how this is written. It doesn't check facts, so the verdict at the top matters more.
+        A small hint from the AI about how this is written. It doesn't check facts, so the verdict at the top matters more.
       </p>
       <details className="mt-2 text-xs leading-relaxed text-ink-faint">
         <summary className="cursor-pointer text-ink-soft hover:text-ink">More detail</summary>

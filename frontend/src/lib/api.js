@@ -14,7 +14,7 @@ async function request(path, options = {}) {
   try {
     res = await fetch(`${BASE}${path}`, options);
   } catch {
-    throw new Error("We can't reach the checking service right now. Please try again in a minute.");
+    throw new Error("The checking service can't be reached right now. Please try again in a minute.");
   }
   if (!res.ok) throw new Error(await errorMessage(res));
   return res;
